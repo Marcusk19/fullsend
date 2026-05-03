@@ -7,8 +7,21 @@ import adminSvelteConfig from "./web/admin/svelte.config.js";
 import docsSvelteConfig from "./web/docs/svelte.config.js";
 
 export default defineConfig([
+  // Global ignores must be first entry
+  {
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "cloudflare_site/",
+      "internal/",
+      "hack/",
+      "docs/",
+      "web/public/",
+    ],
+  },
+
   js.configs.recommended,
-  ts.configs.recommended,
+  ...ts.configs.recommended,
   svelte.configs.recommended,
   svelte.configs.prettier,
 
@@ -86,16 +99,4 @@ export default defineConfig([
     },
   },
 
-  // Ignore patterns
-  {
-    ignores: [
-      "dist/",
-      "node_modules/",
-      "cloudflare_site/",
-      "internal/",
-      "hack/",
-      "docs/",
-      "web/public/",
-    ],
-  },
 ]);
