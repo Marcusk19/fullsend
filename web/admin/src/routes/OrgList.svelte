@@ -117,14 +117,9 @@
   let rowUi = $state<Record<string, RowUiEntry>>({});
   let rowEvalGen = 0;
 
-  async function readDeployPreflightOrSkipped(
-    octokit: Octokit,
-    accessToken: string,
-  ) {
+  async function readDeployPreflightOrSkipped(octokit: Octokit, accessToken: string) {
     try {
-      return buildDeployPreflight(
-        await readTokenScopesHeaderCached(octokit, accessToken),
-      );
+      return buildDeployPreflight(await readTokenScopesHeaderCached(octokit, accessToken));
     } catch {
       return buildDeployPreflight(null);
     }
@@ -161,8 +156,7 @@
         ...rowUi,
         [login]: {
           kind: "error",
-          message:
-            e instanceof Error ? e.message : "Failed to evaluate organisation.",
+          message: e instanceof Error ? e.message : "Failed to evaluate organisation.",
         },
       };
     }
@@ -235,17 +229,14 @@
             } catch (e) {
               nextUi[login] = {
                 kind: "error",
-                message:
-                  e instanceof Error ? e.message : "Failed to evaluate organisation.",
+                message: e instanceof Error ? e.message : "Failed to evaluate organisation.",
               };
             }
           }
         }
         rowUi = nextUi;
 
-        const needNetwork = priorityOrder.filter(
-          (login) => !hasOrgListAnalysisCacheEntry(login),
-        );
+        const needNetwork = priorityOrder.filter((login) => !hasOrgListAnalysisCacheEntry(login));
         if (needNetwork.length === 0) return;
 
         const hints = await batchOrganizationsFullsendRepoExists(octokit, needNetwork);
@@ -280,8 +271,7 @@
                 ...rowUi,
                 [login]: {
                   kind: "error",
-                  message:
-                    e instanceof Error ? e.message : "Failed to evaluate organisation.",
+                  message: e instanceof Error ? e.message : "Failed to evaluate organisation.",
                 },
               };
             }
@@ -380,11 +370,7 @@
       const capped = filterOrgsBySearch(r.orgs, search).slice(0, DISPLAY_CAP);
       commitDisplayedRowsFromScan(capped, true);
       listCheckAt = Date.now();
-      if (
-        opts?.allowEmptyFollowUpPoll &&
-        r.orgs.length === 0 &&
-        !signal.aborted
-      ) {
+      if (opts?.allowEmptyFollowUpPoll && r.orgs.length === 0 && !signal.aborted) {
         scheduleEmptyListRechecks();
       }
       hasCompletedOrgFetchOnce = true;
@@ -392,8 +378,7 @@
       if (gen !== loadGeneration) return;
       if (e instanceof DOMException && e.name === "AbortError") {
         if (fetchTimedOut) {
-          error =
-            "Refreshing organisations timed out. Check your connection and try again.";
+          error = "Refreshing organisations timed out. Check your connection and try again.";
           hasCompletedOrgFetchOnce = true;
         }
         return;
@@ -412,8 +397,7 @@
       if (e instanceof FetchOrgsError) {
         error = e.message;
       } else {
-        error =
-          e instanceof Error ? e.message : "Failed to load organisations.";
+        error = e instanceof Error ? e.message : "Failed to load organisations.";
       }
       hasCompletedOrgFetchOnce = true;
     } finally {
@@ -457,9 +441,7 @@
   const filteredAll = $derived(filterOrgsBySearch(serverOrgs, search));
   const showCapHint = $derived(filteredAll.length > DISPLAY_CAP);
 
-  const installAppHref = $derived(
-    githubAppInstallationsNewUrl((resolvedAppSlug ?? "").trim()),
-  );
+  const installAppHref = $derived(githubAppInstallationsNewUrl((resolvedAppSlug ?? "").trim()));
 
   function orgAvatarUrl(login: string): string {
     return `https://github.com/${encodeURIComponent(login)}.png?size=64`;
@@ -475,9 +457,7 @@
 </script>
 
 <section class="orgs" aria-labelledby="orgs-h">
-  <h1 id="orgs-h">
-    Select an organisation to deploy or configure Fullsend
-  </h1>
+  <h1 id="orgs-h">Select an organisation to deploy or configure Fullsend</h1>
 
   {#if !$githubUser}
     <p class="muted">Sign in to load this list.</p>
@@ -590,17 +570,11 @@
                     <span class="row-spinner-disc" aria-hidden="true"></span>
                   </div>
                 {:else if ui.kind === "configure"}
-                  <a
-                    class="btn btn-muted"
-                    href="#/org/{encodeURIComponent(o.login)}"
-                  >
+                  <a class="btn btn-muted" href="#/org/{encodeURIComponent(o.login)}">
                     Configure
                   </a>
                 {:else if ui.kind === "deploy"}
-                  <a
-                    class="btn btn-primary"
-                    href="#/install/{encodeURIComponent(o.login)}"
-                  >
+                  <a class="btn btn-primary" href="#/install/{encodeURIComponent(o.login)}">
                     Deploy Fullsend
                   </a>
                 {:else if ui.kind === "cannot_deploy"}
@@ -670,12 +644,7 @@
           {/each}
         </ul>
         {#if loading && displayedOrgs.length > 0}
-          <div
-            class="org-more-loading"
-            role="status"
-            aria-live="polite"
-            aria-busy="true"
-          >
+          <div class="org-more-loading" role="status" aria-live="polite" aria-busy="true">
             <div class="org-more-spinner" aria-hidden="true"></div>
             <span class="sr-only">Refreshing organisation list</span>
           </div>
@@ -687,10 +656,10 @@
       <h2 id="install-app-h" class="install-app-heading">Fullsend Admin app</h2>
       {#if serverOrgs.length === 0}
         <p class="install-app-copy">
-          After you install or change access on GitHub, click <strong>Refresh</strong> at the top of
-          this page. GitHub does not return you here automatically. It can take a minute or longer
-          before a new install appears in GitHub’s data — after you refresh, we also recheck a few
-          times in the background when the list is still empty.
+          After you install or change access on GitHub, click <strong>Refresh</strong> at the top of this
+          page. GitHub does not return you here automatically. It can take a minute or longer before a
+          new install appears in GitHub’s data — after you refresh, we also recheck a few times in the
+          background when the list is still empty.
         </p>
         <p class="install-app-line">
           {#if installAppHref}
@@ -742,12 +711,14 @@
   .orgs {
     max-width: 42rem;
   }
+
   .orgs h1 {
     margin: 0 0 1rem;
     font-size: 1.15rem;
     font-weight: 600;
     line-height: 1.35;
   }
+
   .org-loading {
     display: flex;
     flex-direction: column;
@@ -757,6 +728,7 @@
     padding: 2.5rem 1rem;
     min-height: 8rem;
   }
+
   .org-loading-spinner {
     width: 2.25rem;
     height: 2.25rem;
@@ -765,16 +737,19 @@
     border-radius: 50%;
     animation: org-spin 0.75s linear infinite;
   }
+
   .org-loading-label {
     margin: 0;
     font-size: 0.95rem;
     color: #444;
   }
+
   @keyframes org-spin {
     to {
       transform: rotate(360deg);
     }
   }
+
   .org-more-loading {
     display: flex;
     align-items: center;
@@ -785,6 +760,7 @@
     border-radius: 8px;
     background: #fafafa;
   }
+
   .org-more-spinner {
     width: 2rem;
     height: 2rem;
@@ -793,6 +769,7 @@
     border-radius: 50%;
     animation: org-spin 0.75s linear infinite;
   }
+
   .toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -800,6 +777,7 @@
     align-items: center;
     margin-bottom: 0.5rem;
   }
+
   .list-check-at {
     margin: 0 0 0.75rem;
     font-size: 0.88rem;
@@ -807,16 +785,19 @@
     color: #444;
     max-width: 40rem;
   }
+
   .cap-hint {
     margin: 0 0 0.75rem;
     font-size: 0.88rem;
     color: #cf222e;
     font-weight: 500;
   }
+
   .search-label {
     flex: 1;
     min-width: 12rem;
   }
+
   .search {
     width: 100%;
     box-sizing: border-box;
@@ -825,6 +806,7 @@
     border: 1px solid #ccc;
     border-radius: 6px;
   }
+
   .btn {
     cursor: pointer;
     padding: 0.4rem 0.75rem;
@@ -833,19 +815,23 @@
     background: #f4f4f4;
     font: inherit;
   }
+
   .btn:focus-visible {
     outline: 2px solid #0969da;
     outline-offset: 2px;
   }
+
   .btn:disabled {
     opacity: 0.55;
     cursor: not-allowed;
   }
+
   .btn-refresh {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
   }
+
   .btn-refresh-spinner {
     width: 0.95rem;
     height: 0.95rem;
@@ -855,25 +841,30 @@
     animation: org-spin 0.75s linear infinite;
     flex-shrink: 0;
   }
+
   .btn-refresh:disabled {
     opacity: 0.88;
   }
+
   .row-actions a.btn {
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     box-sizing: border-box;
   }
+
   .btn-muted {
     background: #eaeaea;
     border-color: #bbb;
     color: #333;
   }
+
   .btn-primary {
     background: #0969da;
     border-color: #0969da;
     color: #fff;
   }
+
   .sr-only {
     position: absolute;
     width: 1px;
@@ -885,6 +876,7 @@
     white-space: nowrap;
     border: 0;
   }
+
   .list {
     list-style: none;
     margin: 0.75rem 0 0;
@@ -893,6 +885,7 @@
     border-radius: 8px;
     overflow: hidden;
   }
+
   .row {
     display: flex;
     flex-wrap: wrap;
@@ -902,24 +895,29 @@
     padding: 0.55rem 0.75rem;
     border-bottom: 1px solid #eee;
   }
+
   .row:last-child {
     border-bottom: none;
   }
+
   .row-main {
     display: flex;
     align-items: center;
     gap: 0.65rem;
     min-width: 0;
   }
+
   .org-avatar {
     border-radius: 6px;
     flex-shrink: 0;
   }
+
   .org-name {
     font-size: 0.95rem;
     font-weight: 500;
     word-break: break-word;
   }
+
   .row-actions {
     display: flex;
     flex-wrap: wrap;
@@ -927,6 +925,7 @@
     align-items: center;
     min-height: 2.25rem;
   }
+
   .row-spinner {
     display: flex;
     align-items: center;
@@ -934,6 +933,7 @@
     width: 2rem;
     height: 2rem;
   }
+
   .row-spinner-disc {
     display: block;
     width: 1.25rem;
@@ -943,6 +943,7 @@
     border-radius: 50%;
     animation: org-spin 0.75s linear infinite;
   }
+
   .cannot-deploy {
     display: flex;
     flex-wrap: wrap;
@@ -951,13 +952,16 @@
     font-size: 0.88rem;
     color: #9a6700;
   }
+
   .warn-icon {
     font-size: 1rem;
     line-height: 1;
   }
+
   .cannot-deploy-label {
     font-weight: 600;
   }
+
   .info-btn {
     box-sizing: border-box;
     min-width: 1.35rem;
@@ -973,10 +977,12 @@
     cursor: help;
     line-height: 1;
   }
+
   .info-btn:focus-visible {
     outline: 2px solid #0969da;
     outline-offset: 2px;
   }
+
   .info-btn--err {
     border-color: #cf222e;
     background: #ffeef0;
@@ -984,33 +990,39 @@
     font-style: italic;
     cursor: pointer;
   }
+
   .cannot-deploy-popover {
     max-width: min(22rem, calc(100vw - 2rem));
     padding: 0.75rem 0.85rem;
     border: 1px solid #d4a72c;
     border-radius: 8px;
     background: #fffef5;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 12%);
     color: #24292f;
     font-size: 0.85rem;
     line-height: 1.45;
   }
+
   .cannot-deploy-popover-lead {
     margin: 0 0 0.5rem;
     font-weight: 500;
   }
+
   .cannot-deploy-popover-sub {
     margin: 0.5rem 0 0.35rem;
     font-weight: 600;
     font-size: 0.82rem;
   }
+
   .cannot-deploy-popover-list {
     margin: 0;
     padding-left: 1.15rem;
   }
+
   .cannot-deploy-popover-list li {
     margin: 0.2rem 0;
   }
+
   .row-err {
     display: flex;
     flex-wrap: wrap;
@@ -1020,38 +1032,45 @@
     font-size: 0.85rem;
     color: #a40e26;
   }
+
   .err-icon {
     font-size: 0.75rem;
     line-height: 1;
   }
+
   .row-err-label {
     font-weight: 700;
   }
+
   .row-err-popover {
     max-width: min(22rem, calc(100vw - 2rem));
     padding: 0.75rem 0.85rem;
     border: 1px solid #f0b2b2;
     border-radius: 8px;
     background: #fff8f8;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 12%);
     color: #24292f;
     font-size: 0.85rem;
     line-height: 1.45;
     word-break: break-word;
   }
+
   .row-err-popover-lead {
     margin: 0;
     font-weight: 500;
   }
+
   .row-err-retry {
     flex-shrink: 0;
     padding: 0.25rem 0.5rem;
     font-size: 0.82rem;
   }
+
   .muted {
     color: #555;
     margin: 0 0 0.75rem;
   }
+
   .hint {
     margin: 0 0 0.75rem;
     padding: 0.65rem 0.75rem;
@@ -1063,9 +1082,11 @@
     border-radius: 6px;
     max-width: 40rem;
   }
+
   .hint--empty {
     margin-bottom: 1rem;
   }
+
   .banner {
     display: flex;
     flex-wrap: wrap;
@@ -1078,24 +1099,29 @@
     background: #ffeef0;
     font-size: 0.92rem;
   }
+
   .banner-msg {
     flex: 1;
     min-width: 10rem;
     color: #24292f;
   }
+
   .banner-retry {
     flex-shrink: 0;
   }
+
   .install-app-block {
     margin-top: 1.25rem;
     padding-top: 1rem;
     border-top: 1px solid #d8dee4;
   }
+
   .install-app-heading {
     margin: 0 0 0.5rem;
     font-size: 1rem;
     font-weight: 600;
   }
+
   .install-app-copy {
     margin: 0 0 0.65rem;
     font-size: 0.9rem;
@@ -1103,12 +1129,14 @@
     color: #444;
     max-width: 40rem;
   }
+
   .install-app-line {
     margin: 0 0 0.65rem;
     font-size: 0.9rem;
     line-height: 1.45;
     max-width: 40rem;
   }
+
   .orgs-plain-link,
   .orgs-plain-link:visited {
     appearance: none;
@@ -1127,28 +1155,34 @@
     text-underline-offset: 0.15em;
     cursor: pointer;
   }
+
   .orgs-plain-link:hover {
     color: #0550ae;
   }
+
   .orgs-plain-link:focus-visible {
     outline: 2px solid #0969da;
     outline-offset: 2px;
     border-radius: 2px;
   }
+
   .install-app-after-link {
     font-size: 0.9rem;
     color: #57606a;
     font-weight: 400;
   }
+
   .install-app-unavailable-inline {
     color: #57606a;
     font-weight: 400;
   }
+
   .install-app-unavailable {
     margin: 0;
     font-size: 0.88rem;
     max-width: 40rem;
   }
+
   .install-app-unavailable code {
     font-size: 0.85em;
   }

@@ -98,9 +98,7 @@ describe("fetchOrgs (installations)", () => {
         yield {
           status: 200,
           data: {
-            installations: [
-              { id: 1, account: { login: "alice", type: "User" } },
-            ],
+            installations: [{ id: 1, account: { login: "alice", type: "User" } }],
           },
         };
       })(),
@@ -154,13 +152,9 @@ describe("fetchOrgs (installations)", () => {
       })(),
     );
 
-    await expect(
-      fetchOrgs("token", { githubLogin: testLogin, force: true }),
-    ).rejects.toSatisfy(
+    await expect(fetchOrgs("token", { githubLogin: testLogin, force: true })).rejects.toSatisfy(
       (e: unknown) =>
-        e instanceof FetchOrgsError &&
-        e.status === 401 &&
-        e.message.includes("sign in again"),
+        e instanceof FetchOrgsError && e.status === 401 && e.message.includes("sign in again"),
     );
   });
 
@@ -171,13 +165,8 @@ describe("fetchOrgs (installations)", () => {
       })(),
     );
 
-    await expect(
-      fetchOrgs("token", { githubLogin: testLogin, force: true }),
-    ).rejects.toSatisfy(
-      (e: unknown) =>
-        e instanceof FetchOrgsError &&
-        e.status === 403 &&
-        e.message.includes("403"),
+    await expect(fetchOrgs("token", { githubLogin: testLogin, force: true })).rejects.toSatisfy(
+      (e: unknown) => e instanceof FetchOrgsError && e.status === 403 && e.message.includes("403"),
     );
   });
 
@@ -206,17 +195,13 @@ describe("fetchOrgs (installations)", () => {
         yield {
           status: 200,
           data: {
-            installations: [
-              { account: { login: "a", type: "Organization" }, app_slug: "x" },
-            ],
+            installations: [{ account: { login: "a", type: "Organization" }, app_slug: "x" }],
           },
         };
         yield {
           status: 200,
           data: {
-            installations: [
-              { account: { login: "b", type: "Organization" }, app_slug: "x" },
-            ],
+            installations: [{ account: { login: "b", type: "Organization" }, app_slug: "x" }],
           },
         };
       })(),
