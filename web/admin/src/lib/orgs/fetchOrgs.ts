@@ -151,7 +151,7 @@ export async function fetchOrgsWithProgress(
 
       accumulated.push(...installationsFromPageData(page.data));
 
-      const { orgs, appSlug } = orgRowsAndSlugFromInstallations(accumulated);
+      const { orgs, appSlug: _appSlug } = orgRowsAndSlugFromInstallations(accumulated);
       options.onProgress(orgs, {
         done: false,
         installationPagesFetched: pages,

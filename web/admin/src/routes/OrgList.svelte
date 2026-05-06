@@ -47,7 +47,7 @@
 
   let serverOrgs = $state<OrgRow[]>([]);
   let displayedOrgs = $state<OrgRow[]>([]);
-  let scanComplete = $state(false);
+  let _scanComplete = $state(false);
   let search = $state("");
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -80,11 +80,11 @@
   /** Batched updates while the installation list fetch is still running (unfiltered growth from `onProgress`). */
   function commitDisplayedRowsFromScan(capped: OrgRow[], done: boolean): void {
     if (done) {
-      scanComplete = true;
+      _scanComplete = true;
       displayedOrgs = capped;
       return;
     }
-    scanComplete = false;
+    _scanComplete = false;
     const c = capped.length;
     const d = displayedOrgs.length;
 
@@ -299,7 +299,7 @@
       pollSession += 1;
       serverOrgs = [];
       displayedOrgs = [];
-      scanComplete = false;
+      _scanComplete = false;
       error = null;
       emptyHint = null;
       resolvedAppSlug = null;
@@ -339,7 +339,7 @@
       serverOrgs = [];
       displayedOrgs = [];
     }
-    scanComplete = false;
+    _scanComplete = false;
 
     let fetchTimedOut = false;
     let fetchTimeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -390,7 +390,7 @@
         serverOrgs = [];
         displayedOrgs = [];
       }
-      scanComplete = false;
+      _scanComplete = false;
       emptyHint = null;
       installationListTruncated = false;
       resolvedAppSlug = null;
@@ -422,7 +422,7 @@
         pollSession += 1;
         serverOrgs = [];
         displayedOrgs = [];
-        scanComplete = false;
+        _scanComplete = false;
         error = null;
         emptyHint = null;
         resolvedAppSlug = null;
@@ -598,7 +598,7 @@
                           Access an organisation owner may need to approve:
                         </p>
                         <ul class="cannot-deploy-popover-list">
-                          {#each ui.missingInstallRequirements as line}
+                          {#each ui.missingInstallRequirements as line, i (i)}
                             <li>{line}</li>
                           {/each}
                         </ul>
@@ -606,7 +606,7 @@
                       {#if ui.helpBullets?.length}
                         <p class="cannot-deploy-popover-sub">Next steps</p>
                         <ul class="cannot-deploy-popover-list">
-                          {#each ui.helpBullets as line}
+                          {#each ui.helpBullets as line, i (i)}
                             <li>{line}</li>
                           {/each}
                         </ul>
@@ -872,7 +872,7 @@
     padding: 0;
     margin: -1px;
     overflow: hidden;
-    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
   }
@@ -915,7 +915,7 @@
   .org-name {
     font-size: 0.95rem;
     font-weight: 500;
-    word-break: break-word;
+    overflow-wrap: break-word;
   }
 
   .row-actions {
@@ -1052,7 +1052,7 @@
     color: #24292f;
     font-size: 0.85rem;
     line-height: 1.45;
-    word-break: break-word;
+    overflow-wrap: break-word;
   }
 
   .row-err-popover-lead {

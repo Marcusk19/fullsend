@@ -75,7 +75,7 @@ export function parseOrgConfigYaml(data: string): OrgConfigYaml {
     doc = parse(data, { schema: "core", version: "1.2" }) as unknown;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`parsing org config YAML: ${msg}`);
+    throw new Error(`parsing org config YAML: ${msg}`, { cause: e });
   }
 
   if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {

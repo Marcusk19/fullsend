@@ -147,6 +147,7 @@ describe("fetchOrgs (installations)", () => {
 
   it("throws FetchOrgsError for 401 (Octokit hook notifies in production; not duplicated here)", async () => {
     mockOctokit(() =>
+      // eslint-disable-next-line require-yield
       (async function* () {
         throw Object.assign(new Error("Unauthorized"), { status: 401 });
       })(),
@@ -160,6 +161,7 @@ describe("fetchOrgs (installations)", () => {
 
   it("throws FetchOrgsError for 403", async () => {
     mockOctokit(() =>
+      // eslint-disable-next-line require-yield
       (async function* () {
         throw Object.assign(new Error("Forbidden"), { status: 403 });
       })(),
