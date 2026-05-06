@@ -93,7 +93,7 @@ export default defineConfig([
 
   // Svelte component file-length limit
   {
-    files: ["web/admin/src/**/*.svelte"],
+    files: ["web/admin/src/**/*.svelte", "web/docs/src/**/*.svelte"],
     rules: {
       "max-lines": ["warn", { max: 150, skipBlankLines: true, skipComments: true }],
     },

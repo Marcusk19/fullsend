@@ -47,7 +47,6 @@
 
   let serverOrgs = $state<OrgRow[]>([]);
   let displayedOrgs = $state<OrgRow[]>([]);
-  let _scanComplete = $state(false);
   let search = $state("");
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -80,11 +79,9 @@
   /** Batched updates while the installation list fetch is still running (unfiltered growth from `onProgress`). */
   function commitDisplayedRowsFromScan(capped: OrgRow[], done: boolean): void {
     if (done) {
-      _scanComplete = true;
       displayedOrgs = capped;
       return;
     }
-    _scanComplete = false;
     const c = capped.length;
     const d = displayedOrgs.length;
 
@@ -299,7 +296,6 @@
       pollSession += 1;
       serverOrgs = [];
       displayedOrgs = [];
-      _scanComplete = false;
       error = null;
       emptyHint = null;
       resolvedAppSlug = null;
@@ -339,7 +335,6 @@
       serverOrgs = [];
       displayedOrgs = [];
     }
-    _scanComplete = false;
 
     let fetchTimedOut = false;
     let fetchTimeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -390,7 +385,6 @@
         serverOrgs = [];
         displayedOrgs = [];
       }
-      _scanComplete = false;
       emptyHint = null;
       installationListTruncated = false;
       resolvedAppSlug = null;
@@ -422,7 +416,6 @@
         pollSession += 1;
         serverOrgs = [];
         displayedOrgs = [];
-        _scanComplete = false;
         error = null;
         emptyHint = null;
         resolvedAppSlug = null;
