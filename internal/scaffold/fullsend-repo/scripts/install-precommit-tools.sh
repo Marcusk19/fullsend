@@ -51,10 +51,11 @@ case "${ARCH}" in
     ;;
 esac
 
-# Print warnings from the resolver.
+# Print warnings from the resolver (sanitize to prevent GHA command injection).
 WARNINGS="$(jq -r '.warnings[]' "${MANIFEST}" 2>/dev/null || true)"
 if [ -n "${WARNINGS}" ]; then
   while IFS= read -r w; do
+    w="${w//::/ }"
     echo "::warning::${w}"
   done <<< "${WARNINGS}"
 fi
@@ -68,9 +69,16 @@ fi
 echo "Installing ${TOOL_COUNT} pre-commit tool dependency(ies)..."
 
 # Process each tool entry.
-jq -c '.tools[]' "${MANIFEST}" | while IFS= read -r entry; do
+while IFS= read -r entry; do
   TYPE="$(echo "${entry}" | jq -r '.type')"
   NAME="$(echo "${entry}" | jq -r '.name')"
+
+  # Skip entries marked as handled elsewhere (e.g., gitleaks in post-scripts).
+  SKIP="$(echo "${entry}" | jq -r '.skip_install // "false"')"
+  if [ "${SKIP}" = "true" ]; then
+    echo "  ${NAME}: skipped (managed by post-script)"
+    continue
+  fi
 
   case "${TYPE}" in
     binary)
@@ -96,39 +104,48 @@ jq -c '.tools[]' "${MANIFEST}" | while IFS= read -r entry; do
         continue
       fi
 
+      # Resolve per-tool goarch override (e.g., actionlint uses "amd64" not "x64").
+      TOOL_GOARCH="$(echo "${entry}" | jq -r ".goarch_override.${ARCH} // empty")"
+      if [ -z "${TOOL_GOARCH}" ]; then
+        TOOL_GOARCH="${GOARCH}"
+      fi
+
       # Resolve URL template.
       URL="${URL_TEMPLATE}"
       URL="${URL//\{version\}/${VERSION}}"
       URL="${URL//\{triple\}/${TRIPLE}}"
-      URL="${URL//\{goarch\}/${GOARCH}}"
+      URL="${URL//\{goarch\}/${TOOL_GOARCH}}"
 
       echo "  ${NAME} v${VERSION}: downloading..."
-      TMPDIR="$(mktemp -d)"
-      TARBALL="${TMPDIR}/${NAME}.tar.gz"
+      DL_TMPDIR="$(mktemp -d)"
+      TARBALL="${DL_TMPDIR}/${NAME}.tar.gz"
 
       curl -fsSL "${URL}" -o "${TARBALL}"
-      echo "${CHECKSUM}  ${TARBALL}" | sha256sum -c - >/dev/null 2>&1
+      if ! echo "${CHECKSUM}  ${TARBALL}" | sha256sum -c -; then
+        echo "::error::Checksum verification failed for ${NAME} v${VERSION}"
+        rm -rf "${DL_TMPDIR}"
+        exit 1
+      fi
 
-      tar xzf "${TARBALL}" -C "${TMPDIR}"
+      tar xzf "${TARBALL}" -C "${DL_TMPDIR}"
 
       # Find and install the binary.
       if [ -n "${STRIP_PREFIX}" ]; then
         RESOLVED_PREFIX="${STRIP_PREFIX//\{triple\}/${TRIPLE}}"
         RESOLVED_PREFIX="${RESOLVED_PREFIX//\{version\}/${VERSION}}"
-        BIN_PATH="${TMPDIR}/${RESOLVED_PREFIX}/${BINARY_NAME}"
+        BIN_PATH="${DL_TMPDIR}/${RESOLVED_PREFIX}/${BINARY_NAME}"
       else
-        BIN_PATH="${TMPDIR}/${BINARY_NAME}"
+        BIN_PATH="${DL_TMPDIR}/${BINARY_NAME}"
       fi
 
       if [ ! -f "${BIN_PATH}" ]; then
         echo "::warning::Binary not found at expected path: ${BIN_PATH}"
-        # Try finding it in the extracted tree.
-        FOUND="$(find "${TMPDIR}" -name "${BINARY_NAME}" -type f | head -1)"
+        FOUND="$(find "${DL_TMPDIR}" -name "${BINARY_NAME}" -type f | head -1)"
         if [ -n "${FOUND}" ]; then
           BIN_PATH="${FOUND}"
         else
           echo "::error::Cannot find ${BINARY_NAME} in archive"
-          rm -rf "${TMPDIR}"
+          rm -rf "${DL_TMPDIR}"
           continue
         fi
       fi
@@ -142,10 +159,10 @@ jq -c '.tools[]' "${MANIFEST}" | while IFS= read -r entry; do
         while IFS= read -r extra; do
           EXTRA_PATH=""
           if [ -n "${STRIP_PREFIX}" ]; then
-            EXTRA_PATH="${TMPDIR}/${RESOLVED_PREFIX}/${extra}"
+            EXTRA_PATH="${DL_TMPDIR}/${RESOLVED_PREFIX}/${extra}"
           fi
           if [ ! -f "${EXTRA_PATH:-}" ]; then
-            EXTRA_PATH="$(find "${TMPDIR}" -name "${extra}" -type f | head -1)"
+            EXTRA_PATH="$(find "${DL_TMPDIR}" -name "${extra}" -type f | head -1)"
           fi
           if [ -n "${EXTRA_PATH}" ] && [ -f "${EXTRA_PATH}" ]; then
             mv "${EXTRA_PATH}" "${INSTALL_DIR}/${extra}"
@@ -155,7 +172,7 @@ jq -c '.tools[]' "${MANIFEST}" | while IFS= read -r entry; do
         done <<< "${EXTRAS}"
       fi
 
-      rm -rf "${TMPDIR}"
+      rm -rf "${DL_TMPDIR}"
       echo "  ${NAME} v${VERSION}: installed to ${INSTALL_DIR}/${BINARY_NAME}"
       ;;
 
@@ -191,6 +208,6 @@ jq -c '.tools[]' "${MANIFEST}" | while IFS= read -r entry; do
       echo "::warning::Unknown install type '${TYPE}' for ${NAME}"
       ;;
   esac
-done
+done < <(jq -c '.tools[]' "${MANIFEST}")
 
 echo "Pre-commit tool installation complete"

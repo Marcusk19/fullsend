@@ -48,19 +48,16 @@ tools:
       binary_name: lychee
 
   # ── gitleaks (secret scanning) ────────────────────────────────────
-  # Post-scripts also install gitleaks independently as a security
-  # gate. This entry ensures pre-commit hooks can find it too.
+  # Post-scripts install gitleaks independently as a security gate.
+  # This entry exists only so the resolver recognizes gitleaks hooks
+  # and does NOT emit a "not in registry" warning. The skip_install
+  # flag prevents double-installing alongside the post-script copy.
   - hook_id: gitleaks
     repo: https://github.com/zricethezav/gitleaks
     install:
       type: binary
       name: gitleaks
-      version: "8.30.1"
-      url_template: "https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_{goarch}.tar.gz"
-      checksums:
-        x86_64: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
-        aarch64: "36a5a5283d0b191a0b5fcf7cf8756238e87448afdc53e3eb4e8756e13c31e5d3"
-      binary_name: gitleaks
+      skip_install: true
 
   # ── shellcheck (shell script linter) ──────────────────────────────
   - hook_id: shellcheck
@@ -70,6 +67,9 @@ tools:
       name: shellcheck
 
   # ── actionlint (GitHub Actions linter) ────────────────────────────
+  # actionlint releases use "amd64"/"arm64" instead of the Rust-style
+  # triple or gitleaks-style "x64". The goarch_override field lets the
+  # installer substitute the correct arch string for this tool only.
   - hook_id: actionlint
     repo: https://github.com/rhysd/actionlint
     install:
@@ -77,9 +77,12 @@ tools:
       name: actionlint
       version: "1.7.11"
       url_template: "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_linux_{goarch}.tar.gz"
+      goarch_override:
+        x86_64: "amd64"
+        aarch64: "arm64"
       checksums:
-        x86_64: "7c1a9bb11b0a8e1ba8ae3766ce930e82acc6a839ed07de3a31def399aea3fa14"
-        aarch64: "97ca7abb60abaf3b8ad1e1c64f1fb87b80e2e4b5ade3b4ad059e2be3e49e7bc1"
+        x86_64: "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a"
+        aarch64: "21bc0dfb57a913fe175298c2a9e906ee630f747cb66d0a934d0d4b69f4ee1235"
       binary_name: actionlint
 
   # ── uv / uvx (Python package manager, needed for ty check) ───────
@@ -93,7 +96,7 @@ tools:
       url_template: "https://github.com/astral-sh/uv/releases/download/{version}/uv-{triple}.tar.gz"
       checksums:
         x86_64: "f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296"
-        aarch64: "7bb5c336afcf14b0ac3d82e08e7a9669cffeca3c97f17280d0c89a51a60ded99"
+        aarch64: "c4958f729e216f1610632574ed927b8cf0af1bd02cb88cb30d948571727aee43"
       strip_prefix: "uv-{triple}"
       binary_name: uv
       extra_binaries:

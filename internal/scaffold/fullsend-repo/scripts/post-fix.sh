@@ -175,7 +175,7 @@ if [ -f .pre-commit-config.yaml ] \
    && [ -f "${RESOLVE_SCRIPT}" ] \
    && [ -f "${INSTALL_SCRIPT}" ]; then
   MANIFEST="$(mktemp)"
-  bash "${RESOLVE_SCRIPT}" "." > "${MANIFEST}" 2>&1 || true
+  bash "${RESOLVE_SCRIPT}" "." > "${MANIFEST}" 2>/dev/null || true
   if [ -s "${MANIFEST}" ] && jq -e '.tools | length > 0' "${MANIFEST}" >/dev/null 2>&1; then
     bash "${INSTALL_SCRIPT}" "${MANIFEST}"
   fi

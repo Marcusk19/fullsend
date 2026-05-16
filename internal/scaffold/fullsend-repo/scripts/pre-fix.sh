@@ -115,7 +115,7 @@ if [ -f "${TARGET_REPO}/.pre-commit-config.yaml" ] \
    && [ -f "${INSTALL_SCRIPT}" ]; then
   echo "Resolving pre-commit tool dependencies..."
   MANIFEST="$(mktemp)"
-  bash "${RESOLVE_SCRIPT}" "${TARGET_REPO}" > "${MANIFEST}" 2>&1 || true
+  bash "${RESOLVE_SCRIPT}" "${TARGET_REPO}" > "${MANIFEST}" 2>/dev/null || true
   if [ -s "${MANIFEST}" ] && jq -e '.tools | length > 0' "${MANIFEST}" >/dev/null 2>&1; then
     bash "${INSTALL_SCRIPT}" "${MANIFEST}"
   else
