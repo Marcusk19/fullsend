@@ -1,0 +1,111 @@
+# Known pre-commit hook tool dependencies.
+#
+# Used by resolve-precommit-tools.sh to auto-detect which system tools
+# a target repo's .pre-commit-config.yaml requires. The resolver reads
+# the target repo's config, matches hook repos and IDs against this
+# registry, and produces a JSON manifest that install-precommit-tools.sh
+# consumes.
+#
+# Structure:
+#   Each entry maps a pre-commit hook repo URL to its hooks and the
+#   tools they need. Tools are categorized by install method:
+#     binary — downloaded from a release URL with SHA256 verification
+#     apt    — installed via apt-get on Ubuntu-based runners
+#     pip    — installed via pip
+#     npm    — installed via npm
+#
+#   Binary entries must include pinned versions and per-arch checksums
+#   for supply-chain safety. Use the same version+checksum pattern as
+#   images/code/Containerfile and the post-scripts.
+#
+# Adding a new tool:
+#   1. Find the hook repo URL and hook ID in .pre-commit-config.yaml
+#   2. Add an entry below with the tools it needs
+#   3. For binary downloads: pin version, provide checksums for amd64+arm64
+#   4. Run resolve-precommit-tools.sh against a test repo to verify
+#
+# Hooks not listed here fall back to language-based detection:
+#   language: python  → pip is available (GHA runners have Python)
+#   language: node    → npm is available (GHA runners have Node)
+#   language: golang  → Go must be installed
+#   language: rust    → Rust must be installed
+#   language: system  → tool must already be on PATH
+
+tools:
+  # ── lychee (markdown link checker) ────────────────────────────────
+  - hook_id: lint-md-links
+    repo: local
+    match_entry: "lychee"
+    install:
+      type: binary
+      name: lychee
+      version: "0.24.2"
+      url_template: "https://github.com/lycheeverse/lychee/releases/download/lychee-v{version}/lychee-{triple}.tar.gz"
+      checksums:
+        x86_64: "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a"
+        aarch64: "91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c"
+      strip_prefix: "lychee-{triple}"
+      binary_name: lychee
+
+  # ── gitleaks (secret scanning) ────────────────────────────────────
+  # Post-scripts also install gitleaks independently as a security
+  # gate. This entry ensures pre-commit hooks can find it too.
+  - hook_id: gitleaks
+    repo: https://github.com/zricethezav/gitleaks
+    install:
+      type: binary
+      name: gitleaks
+      version: "8.30.1"
+      url_template: "https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_{goarch}.tar.gz"
+      checksums:
+        x86_64: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        aarch64: "36a5a5283d0b191a0b5fcf7cf8756238e87448afdc53e3eb4e8756e13c31e5d3"
+      binary_name: gitleaks
+
+  # ── shellcheck (shell script linter) ──────────────────────────────
+  - hook_id: shellcheck
+    repo: https://github.com/koalaman/shellcheck-precommit
+    install:
+      type: apt
+      name: shellcheck
+
+  # ── actionlint (GitHub Actions linter) ────────────────────────────
+  - hook_id: actionlint
+    repo: https://github.com/rhysd/actionlint
+    install:
+      type: binary
+      name: actionlint
+      version: "1.7.11"
+      url_template: "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_linux_{goarch}.tar.gz"
+      checksums:
+        x86_64: "7c1a9bb11b0a8e1ba8ae3766ce930e82acc6a839ed07de3a31def399aea3fa14"
+        aarch64: "97ca7abb60abaf3b8ad1e1c64f1fb87b80e2e4b5ade3b4ad059e2be3e49e7bc1"
+      binary_name: actionlint
+
+  # ── uv / uvx (Python package manager, needed for ty check) ───────
+  - hook_id: ty
+    repo: local
+    match_entry: "uvx"
+    install:
+      type: binary
+      name: uv
+      version: "0.11.14"
+      url_template: "https://github.com/astral-sh/uv/releases/download/{version}/uv-{triple}.tar.gz"
+      checksums:
+        x86_64: "f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296"
+        aarch64: "7bb5c336afcf14b0ac3d82e08e7a9669cffeca3c97f17280d0c89a51a60ded99"
+      strip_prefix: "uv-{triple}"
+      binary_name: uv
+      extra_binaries:
+        - uvx
+
+# Language fallbacks — when a hook is not in the registry above,
+# the resolver uses the hook's `language` field to determine if
+# the runner already has the required runtime.
+#
+# language: python   → Python + pip available on GHA runners
+# language: node     → Node + npm available on GHA runners
+# language: golang   → Go toolchain needed (warn if missing)
+# language: rust     → Rust toolchain needed (warn if missing)
+# language: system   → tool must be on PATH (warn if missing)
+# language: script   → shell script, no runtime needed

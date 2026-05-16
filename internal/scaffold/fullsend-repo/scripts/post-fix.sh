@@ -8,6 +8,7 @@
 # Security layers (defense-in-depth):
 #   - Protected-path check — reject if agent touched forbidden paths
 #   - Authoritative secret scan — final gate before any push
+#   - Auto-install pre-commit tool deps (from precommit-tools.yaml)
 #   - Authoritative pre-commit — run repo hooks on changed files
 #   - Branch validation — refuse to push main/master
 #   - Token isolation — PUSH_TOKEN never enters the sandbox
@@ -16,13 +17,12 @@
 #   0. Check for agent commits
 #   1. Protected-path check
 #   2. Authoritative secret scan
-#   3. Install lychee
-#   4. Install uv and uvx
-#   5. Authoritative pre-commit check
-#   6. Push branch
-#   7. Process structured output
-#   8. Iteration-cap warning label
-#   9. Summary
+#   3. Auto-install pre-commit tool deps (from precommit-tools.yaml)
+#   4. Authoritative pre-commit check
+#   5. Push branch
+#   6. Process structured output
+#   7. Iteration-cap warning label
+#   8. Summary
 #
 # After pushing, this script processes fix-result.json to:
 #   - Post a summary comment on the PR documenting fixes and disagreements
@@ -70,10 +70,6 @@ PROTECTED_PATHS=(
 
 GITLEAKS_VERSION="8.30.1"
 GITLEAKS_SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
-LYCHEE_VERSION="0.24.2"
-LYCHEE_SHA256="1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a"
-UV_VERSION="0.11.14"
-UV_SHA256="f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296"
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -169,39 +165,26 @@ if [ "${NO_PUSH}" = "false" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Install lychee (for pre-commit markdown link checking)
+# 3. Auto-install pre-commit tool dependencies
 # ---------------------------------------------------------------------------
-if ! command -v lychee >/dev/null 2>&1; then
-  echo "Installing lychee v${LYCHEE_VERSION}..."
-  mkdir -p "${HOME}/.local/bin"
-  curl -fsSL \
-    "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz" \
-    -o /tmp/lychee.tar.gz \
-    && echo "${LYCHEE_SHA256}  /tmp/lychee.tar.gz" | sha256sum -c - \
-    && tar xzf /tmp/lychee.tar.gz -C "${HOME}/.local/bin" lychee \
-    && rm /tmp/lychee.tar.gz
-  export PATH="${HOME}/.local/bin:${PATH}"
+SCRIPT_DIR_POST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESOLVE_SCRIPT="${SCRIPT_DIR_POST}/resolve-precommit-tools.sh"
+INSTALL_SCRIPT="${SCRIPT_DIR_POST}/install-precommit-tools.sh"
+
+if [ -f .pre-commit-config.yaml ] \
+   && [ -f "${RESOLVE_SCRIPT}" ] \
+   && [ -f "${INSTALL_SCRIPT}" ]; then
+  MANIFEST="$(mktemp)"
+  bash "${RESOLVE_SCRIPT}" "." > "${MANIFEST}" 2>&1 || true
+  if [ -s "${MANIFEST}" ] && jq -e '.tools | length > 0' "${MANIFEST}" >/dev/null 2>&1; then
+    bash "${INSTALL_SCRIPT}" "${MANIFEST}"
+  fi
+  rm -f "${MANIFEST}"
 fi
+export PATH="${HOME}/.local/bin:${PATH}"
 
 # ---------------------------------------------------------------------------
-# 4. Install uv and uvx (for pre-commit Python tooling)
-# ---------------------------------------------------------------------------
-if ! command -v uvx >/dev/null 2>&1; then
-  echo "Installing uv v${UV_VERSION} (includes uvx)..."
-  mkdir -p "${HOME}/.local/bin"
-  curl -fsSL \
-    "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
-    -o /tmp/uv.tar.gz \
-    && echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c - \
-    && tar xzf /tmp/uv.tar.gz -C /tmp \
-    && mv /tmp/uv-x86_64-unknown-linux-gnu/uv "${HOME}/.local/bin/" \
-    && mv /tmp/uv-x86_64-unknown-linux-gnu/uvx "${HOME}/.local/bin/" \
-    && rm -rf /tmp/uv.tar.gz /tmp/uv-x86_64-unknown-linux-gnu
-  export PATH="${HOME}/.local/bin:${PATH}"
-fi
-
-# ---------------------------------------------------------------------------
-# 5. Authoritative pre-commit check (only if pushing)
+# 4. Authoritative pre-commit check (only if pushing)
 # ---------------------------------------------------------------------------
 if [ "${NO_PUSH}" = "false" ] && [ -f .pre-commit-config.yaml ]; then
   echo "Running authoritative pre-commit on agent's changed files..."
@@ -227,7 +210,7 @@ if [ "${NO_PUSH}" = "false" ] && [ -f .pre-commit-config.yaml ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Push branch (only if we have commits)
+# 5. Push branch (only if we have commits)
 # ---------------------------------------------------------------------------
 if [ "${NO_PUSH}" = "false" ]; then
   git remote set-url origin \
@@ -242,7 +225,7 @@ if [ "${NO_PUSH}" = "false" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Process structured output (fix-result.json)
+# 6. Process structured output (fix-result.json)
 # ---------------------------------------------------------------------------
 export GH_TOKEN="${PUSH_TOKEN}"
 
@@ -294,7 +277,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Iteration-cap warning label
+# 7. Iteration-cap warning label
 # ---------------------------------------------------------------------------
 ITERATION="${FIX_ITERATION:-1}"
 BOT_CAP="${ITERATION_CAP:-5}"
@@ -313,7 +296,7 @@ if [ "${ITERATION}" -ge "${WARN_THRESHOLD}" ] && is_bot_user "${TRIGGER_SOURCE}"
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Summary
+# 8. Summary
 # ---------------------------------------------------------------------------
 echo ""
 echo "Fix post-script complete:"

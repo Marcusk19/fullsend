@@ -115,3 +115,27 @@ To override, comment \`/code --force\` on this issue.
 fi
 
 echo "No existing human PRs found — proceeding with code agent"
+
+# ---------------------------------------------------------------------------
+# Auto-detect and install pre-commit tool dependencies
+# ---------------------------------------------------------------------------
+# Ensures tools required by the target repo's pre-commit hooks are
+# available on the runner for the authoritative post-script check.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TARGET_REPO="${REPO_DIR:-${GITHUB_WORKSPACE:-}/target-repo}"
+RESOLVE_SCRIPT="${SCRIPT_DIR}/resolve-precommit-tools.sh"
+INSTALL_SCRIPT="${SCRIPT_DIR}/install-precommit-tools.sh"
+
+if [ -f "${TARGET_REPO}/.pre-commit-config.yaml" ] \
+   && [ -f "${RESOLVE_SCRIPT}" ] \
+   && [ -f "${INSTALL_SCRIPT}" ]; then
+  echo "Resolving pre-commit tool dependencies..."
+  MANIFEST="$(mktemp)"
+  bash "${RESOLVE_SCRIPT}" "${TARGET_REPO}" > "${MANIFEST}" 2>&1 || true
+  if [ -s "${MANIFEST}" ] && jq -e '.tools | length > 0' "${MANIFEST}" >/dev/null 2>&1; then
+    bash "${INSTALL_SCRIPT}" "${MANIFEST}"
+  else
+    echo "No additional pre-commit tools needed"
+  fi
+  rm -f "${MANIFEST}"
+fi
