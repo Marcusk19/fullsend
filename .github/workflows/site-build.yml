@@ -1,0 +1,53 @@
+name: Build Site
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build web SPAs
+        run: npm run build
+
+      - name: Prepare deploy bundle
+        run: |
+          set -euo pipefail
+          mkdir -p _bundle/public
+          cp web/public/index.html _bundle/public/index.html
+          mkdir -p _bundle/public/assets
+          cp -a web/dist/assets/. _bundle/public/assets/
+          mkdir -p _bundle/public/admin
+          cp -a web/dist/admin/. _bundle/public/admin/
+          mkdir -p _bundle/public/docs
+          cp -a web/dist/docs/. _bundle/public/docs/
+          mkdir -p _bundle/worker
+          cp -a cloudflare_site/worker/. _bundle/worker/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: _bundle/
+          retention-days: 5

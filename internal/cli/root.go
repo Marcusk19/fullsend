@@ -1,0 +1,34 @@
+package cli
+
+import (
+	"github.com/spf13/cobra"
+)
+
+var version = "dev"
+
+// Version returns the CLI version string set at build time.
+func Version() string {
+	return version
+}
+
+func newRootCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "fullsend",
+		Short:         "Autonomous agentic development for GitHub organizations",
+		Long:          "fullsend automates the setup and management of agentic development pipelines for GitHub organizations.",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Version:       version,
+	}
+	cmd.AddCommand(newAdminCmd())
+	cmd.AddCommand(newRunCmd())
+	cmd.AddCommand(newScanCmd())
+	cmd.AddCommand(newPostReviewCmd())
+	cmd.AddCommand(newPostCommentCmd())
+	return cmd
+}
+
+// Execute runs the root command.
+func Execute() error {
+	return newRootCmd().Execute()
+}

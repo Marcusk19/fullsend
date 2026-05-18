@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# run-workflow - Trigger a GitHub Actions workflow and wait for it
+#
+# Exits 0 if the workflow succeeds, non-zero otherwise.
+#
+# Requires: gh CLI authenticated with actions:write on the target repo
+#
+# Usage: run-workflow <org/repo> <workflow>
+
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "Usage: run-workflow <org/repo> <workflow>" >&2
+  exit 1
+fi
+
+repo="$1"
+workflow="$2"
+
+# Check for an existing in-progress run before dispatching a new one.
+run_id=$(gh run list --repo "${repo}" --workflow "${workflow}" --limit 1 \
+  --status in_progress --json databaseId --jq '.[0].databaseId // empty')
+
+if [[ -z "${run_id}" ]]; then
+  # Also check for queued/waiting/pending/requested runs.
+  run_id=$(gh run list --repo "${repo}" --workflow "${workflow}" --limit 1 \
+    --status queued --json databaseId --jq '.[0].databaseId // empty')
+fi
+
+if [[ -n "${run_id}" ]]; then
+  echo "Found existing run ${run_id} for ${workflow} on ${repo}, watching it..."
+else
+  echo "Dispatching ${workflow} workflow on ${repo}..."
+  gh workflow run "${workflow}" --repo "${repo}"
+
+  echo "Waiting for run to appear..."
+  sleep 3
+  run_id=$(gh run list --repo "${repo}" --workflow "${workflow}" --limit 1 \
+    --json databaseId --jq '.[0].databaseId')
+  echo "Watching run ${run_id}..."
+fi
+
+gh run watch "${run_id}" --repo "${repo}" --exit-status

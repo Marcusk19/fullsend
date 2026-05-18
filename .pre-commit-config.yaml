@@ -1,0 +1,102 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+        exclude: "internal/layers/secrets_test\\.go$|internal/security/scanner_test\\.go$|internal/dispatch/gcf/provisioner_test\\.go$|tests/.*test_.*\\.py$"
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-toml
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.7
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty check
+        entry: uvx ty check . --ignore unresolved-import --ignore unresolved-attribute
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.9.4"
+    hooks:
+      - id: bandit
+        args: ["-r", "hack/", "--skip", "B101,B404,B603"]
+        pass_filenames: false
+
+  - repo: https://github.com/zricethezav/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.11
+    hooks:
+      - id: actionlint
+        args: ["-ignore", "unexpected key \"queue\" for \"concurrency\""]
+
+  - repo: local
+    hooks:
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: lint-adr-status
+        name: lint ADR statuses
+        entry: ./hack/lint-adr-status
+        language: script
+        files: ^docs/ADRs/.*\.md$
+        pass_filenames: false
+
+      - id: lint-adr-numbers
+        name: lint ADR numbers
+        entry: ./hack/lint-adr-numbers
+        language: script
+        files: ^docs/ADRs/.*\.md$
+        pass_filenames: false
+
+      - id: lint-adr-frontmatter
+        name: lint ADR frontmatter
+        entry: ./hack/lint-adr-frontmatter
+        language: python
+        additional_dependencies: ["pyyaml>=6.0"]
+        files: ^docs/ADRs/.*\.md$
+        pass_filenames: false
+
+      - id: lint-broken-symlinks
+        name: lint broken symlinks
+        entry: ./hack/lint-broken-symlinks
+        language: script
+        pass_filenames: false
+        always_run: true
+
+      - id: lint-md-links
+        name: lint markdown links
+        entry: lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path experiments '**/*.md'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: lint-workflow-size
+        name: lint workflow file size
+        entry: ./hack/lint-workflow-size
+        language: script
+        files: ^internal/scaffold/fullsend-repo/(\.github/workflows/|templates/)
+        pass_filenames: false

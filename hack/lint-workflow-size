@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# lint-workflow-size - Guard against logic accumulating in workflow YAML files
+#
+# Workflow files are GitHub-specific glue. Business logic, shell scripts, and
+# agent plumbing should live in scripts/ where they can be tested, reused, and
+# ported to other forges.
+#
+# See:
+#   ADR-0005  Forge abstraction layer
+#   ADR-0008  workflow_dispatch for cross-repo agent dispatch
+#
+# Default cap: 200 lines per workflow file. To raise the cap for a specific
+# file, add a comment anywhere in the YAML:
+#
+#   # lint-workflow-size: max-lines=350
+#
+# This forces an intentional, reviewable decision rather than silent growth.
+
+set -euo pipefail
+
+DEFAULT_MAX=200
+errors=0
+
+check_files() {
+  local dir="$1"
+
+  if [[ ! -d "${dir}" ]]; then
+    return
+  fi
+
+  for file in "${dir}"/*.yml "${dir}"/*.yaml; do
+    [[ -e "${file}" ]] || continue
+
+    lines=$(wc -l < "${file}")
+    filename=$(basename "${file}")
+    relpath="${file}"
+
+    # Check for per-file override
+    max="${DEFAULT_MAX}"
+    override=$(grep -o 'max-lines=[0-9]*' "${file}" 2>/dev/null | grep -o '[0-9]*' | tail -1 || true)
+    if [[ -n "${override}" ]]; then
+      max="${override}"
+    fi
+
+    if [[ "${lines}" -gt "${max}" ]]; then
+      echo "ERROR: ${relpath} is ${lines} lines (max ${max})" >&2
+      echo "" >&2
+      echo "  Workflow files are GitHub-specific glue — keep logic in scripts/" >&2
+      echo "  where it can be tested and ported to other forges." >&2
+      echo "  See ADR-0005 (forge abstraction layer)." >&2
+      echo "" >&2
+      echo "  To fix: extract inline shell into scripts/ and call with" >&2
+      echo "    run: bash scripts/your-script.sh" >&2
+      echo "" >&2
+      echo "  To raise the cap (if the size is justified), add this comment" >&2
+      echo "  to the file:" >&2
+      echo "    # lint-workflow-size: max-lines=<new-limit>" >&2
+      echo "" >&2
+      errors=$((errors + 1))
+    fi
+  done
+}
+
+# Agent workflow files in the .fullsend repo scaffold
+check_files "internal/scaffold/fullsend-repo/.github/workflows"
+
+# Shim workflow template (deployed to enrolled repos)
+check_files "internal/scaffold/fullsend-repo/templates"
+
+if [[ "${errors}" -gt 0 ]]; then
+  echo "FAILED: ${errors} workflow file(s) exceed size limit" >&2
+  exit 1
+else
+  echo "OK: All workflow files within size limits"
+fi

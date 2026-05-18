@@ -1,0 +1,3 @@
+# Web
+
+Browser-delivered assets for the public site: static files under `public/` today (document graph as `index.html`), plus the **admin installation SPA** under [`admin/`](admin/) (Svelte + Vite; **`vite.config.ts`** at the repository root). Local admin OAuth expects **`GITHUB_APP_*` in the environment** (see [`admin/README.md`](admin/README.md)); **mise** can load repo-root **`.env.local`** for you if you use it. Build output is `web/admin/dist/` and CI stages `_bundle/public/admin/`. **`package.json` / `npm run dev` stay at the repository root** (see [ADR 0019](../docs/ADRs/0019-web-source-and-cloudflare-site-layout.md)). Wrangler configuration and the Worker live only under [`../cloudflare_site/`](../cloudflare_site/).

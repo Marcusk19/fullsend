@@ -1,0 +1,124 @@
+# Containerfile — sandbox image for the fullsend code agent.
+#
+# Extends the base fullsend sandbox image with tools needed by the code agent:
+#   - Go (compile + test target repos written in Go)
+#   - lychee (markdown link checker for pre-commit hooks)
+#   - scan-secrets (gitleaks wrapper for code-implementation skill)
+#
+# The base image already provides Claude Code, rsync, gitleaks, tirith,
+# pre-commit, gitlint, and the ProtectAI DeBERTa-v3 ONNX model.
+# See images/sandbox/Containerfile in fullsend-ai/fullsend for the base definition.
+#
+# This image is built AUTOMATICALLY by .github/workflows/sandbox-image.yml
+# (build-code job) on every push to main that touches images/code/.
+# You can also trigger it manually via workflow_dispatch.
+#
+# Published to: ghcr.io/fullsend-ai/fullsend-code:latest
+#
+# The harness references this image:
+#   image: ghcr.io/fullsend-ai/fullsend-code:latest
+
+# CI passes --build-arg BASE_IMAGE=... from the build-base job output.
+# The default lets local builds work when the sandbox image is already pulled.
+ARG BASE_IMAGE=ghcr.io/fullsend-ai/fullsend-sandbox:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# BuildKit automatic platform ARG — set by --platform during multi-arch builds.
+ARG TARGETARCH
+
+# ---------------------------------------------------------------------------
+# CA certificates — git 2.43 on Ubuntu Noble is linked against
+# libcurl-gnutls which does NOT read SSL_CERT_FILE. It needs either
+# GIT_SSL_CAINFO env or http.sslCAInfo git config to find the CA bundle.
+#
+# The OpenShell sandbox does TLS termination for network policy and
+# injects its own CA at /etc/openshell-tls/ca-bundle.pem (NVIDIA/OpenShell#790).
+# The env file (code-agent.env) sets GIT_SSL_CAINFO dynamically at runtime.
+# The git system config below is a build-time fallback for the system bundle.
+RUN if command -v apt-get >/dev/null 2>&1; then \
+      apt-get update -qq && apt-get install -y -qq ca-certificates && rm -rf /var/lib/apt/lists/*; \
+    elif command -v apk >/dev/null 2>&1; then \
+      apk add --no-cache ca-certificates; \
+    elif command -v dnf >/dev/null 2>&1; then \
+      dnf install -y ca-certificates && dnf clean all; \
+    fi \
+    && update-ca-certificates 2>/dev/null || true
+# Set the system CA bundle as git's default sslCAInfo. At runtime, the
+# env file overrides this with the OpenShell bundle if present.
+RUN git config --system http.sslCAInfo /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Go toolchain — needed to compile and run tests in Go-based target repos.
+# Without this the agent falls back to manual code review (no `go build`,
+# `go test`, or `go vet`), wasting ~4 tool calls trying to find Go.
+#
+# Pinned version + SHA256 checksum for supply chain safety.
+# To update: get the latest linux-{amd64,arm64} archive + sha256 from https://go.dev/dl/?mode=json
+ARG GO_VERSION=1.24.13
+ARG GO_SHA256_AMD64=1fc94b57134d51669c72173ad5d49fd62afb0f1db9bf3f798fd98ee423f8d730
+ARG GO_SHA256_ARM64=74d97be1cc3a474129590c67ebf748a96e72d9f3a2b6fef3ed3275de591d49b3
+
+RUN case "$TARGETARCH" in \
+      amd64) GO_SHA="$GO_SHA256_AMD64" ;; \
+      arm64) GO_SHA="$GO_SHA256_ARM64" ;; \
+      *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" \
+      -o /tmp/go.tar.gz \
+    && echo "${GO_SHA}  /tmp/go.tar.gz" | sha256sum -c - \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}" \
+    GOPATH="/sandbox/go" \
+    GOMODCACHE="/sandbox/go/pkg/mod"
+
+# ---------------------------------------------------------------------------
+# gopls — Go language server for Claude Code LSP code intelligence.
+ARG GOPLS_VERSION=0.18.1
+RUN GOBIN=/usr/local/go/bin go install "golang.org/x/tools/gopls@v${GOPLS_VERSION}" \
+    && gopls version
+
+# ---------------------------------------------------------------------------
+# lychee — markdown link checker used by pre-commit hooks (lint-md-links).
+# Baked into the image so pre-commit hooks work without network access.
+# The release archive nests the binary under lychee-<target>/.
+# To update: bump LYCHEE_VERSION and LYCHEE_SHA256_{AMD64,ARM64} from:
+#   https://github.com/lycheeverse/lychee/releases
+ARG LYCHEE_VERSION=0.24.2
+ARG LYCHEE_SHA256_AMD64=1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+ARG LYCHEE_SHA256_ARM64=91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c
+RUN case "$TARGETARCH" in \
+      amd64) LY_TRIPLE="x86_64-unknown-linux-gnu";  LY_SHA="$LYCHEE_SHA256_AMD64" ;; \
+      arm64) LY_TRIPLE="aarch64-unknown-linux-gnu"; LY_SHA="$LYCHEE_SHA256_ARM64" ;; \
+      *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL \
+      "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-${LY_TRIPLE}.tar.gz" \
+      -o /tmp/lychee.tar.gz \
+    && echo "${LY_SHA}  /tmp/lychee.tar.gz" | sha256sum -c - \
+    && tar xzf /tmp/lychee.tar.gz -C /tmp \
+    && mv "/tmp/lychee-${LY_TRIPLE}/lychee" /usr/local/bin/lychee \
+    && chmod +x /usr/local/bin/lychee \
+    && rm -rf /tmp/lychee.tar.gz "/tmp/lychee-${LY_TRIPLE}"
+
+# ---------------------------------------------------------------------------
+# gitleaks is already installed in the base sandbox image.
+# See images/sandbox/Containerfile for the pinned version and checksums.
+
+# ---------------------------------------------------------------------------
+# pre-commit + gitlint are already installed in the base sandbox image
+# (pip install into /sandbox/.venv; the venv bin dir is on PATH).
+# See images/sandbox/Containerfile for the pinned versions.
+
+# ---------------------------------------------------------------------------
+# scan-secrets — gitleaks wrapper used by the code-implementation skill.
+# Baked into the image so the agent has it at /usr/local/bin without
+# needing host_files or network access. /usr is read-only in the
+# sandbox policy, so the agent cannot tamper with it at runtime.
+COPY scan-secrets /usr/local/bin/scan-secrets
+RUN chmod +x /usr/local/bin/scan-secrets
+
+USER sandbox
