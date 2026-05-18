@@ -208,6 +208,14 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary str
 		}
 	}
 
+	// 2b-pre. Pre-flight Vertex AI authorization check.
+	// Verify that WIF credentials can reach Vertex AI before spending ~100s
+	// on sandbox creation. See #1032.
+	if err := checkVertexAccess(printer); err != nil {
+		printer.StepFail("Vertex AI pre-flight check failed")
+		return fmt.Errorf("vertex AI pre-flight check: %w", err)
+	}
+
 	// 2c. Run pre-script on the host (if configured).
 	if h.PreScript != "" {
 		preStart := time.Now()
