@@ -29,24 +29,27 @@ func sanitizeDownload(localDir string) error {
 	if err != nil {
 		return err
 	}
-	absLocal = filepath.Clean(absLocal)
+	absLocal, err = filepath.EvalSymlinks(absLocal)
+	if err != nil {
+		return err
+	}
 
 	return filepath.WalkDir(absLocal, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.Type()&fs.ModeSymlink != 0 {
-			target, readErr := os.Readlink(path)
+			// Resolve the full symlink chain to a real path.
+			// EvalSymlinks fails on dangling or looping links — remove those.
+			linkTarget, readErr := os.Readlink(path)
 			if readErr != nil {
 				return os.Remove(path)
 			}
-			// Absolute targets always point outside the repo root.
-			if filepath.IsAbs(target) {
+			joined := filepath.Clean(filepath.Join(filepath.Dir(path), linkTarget))
+			resolved, evalErr := filepath.EvalSymlinks(joined)
+			if evalErr != nil {
 				return os.Remove(path)
 			}
-			// Resolve the relative target against the symlink's directory and
-			// remove if it escapes the repo root.
-			resolved := filepath.Clean(filepath.Join(filepath.Dir(path), target))
 			if !strings.HasPrefix(resolved+string(filepath.Separator), absLocal+string(filepath.Separator)) {
 				return os.Remove(path)
 			}
