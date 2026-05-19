@@ -194,6 +194,27 @@ func TestSanitizeDownload_RemovesRelativeSymlinksEscapingRepo(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "escaping relative symlink should have been removed")
 }
 
+func TestSanitizeDownload_RemovesDirSymlinkIndirection(t *testing.T) {
+	repo := t.TempDir()
+
+	// Place a secret file outside the repo root.
+	secret := filepath.Join(filepath.Dir(repo), "secret")
+	require.NoError(t, os.WriteFile(secret, []byte("leaked"), 0o644))
+	t.Cleanup(func() { os.Remove(secret) })
+
+	// d/x is a directory symlink to "." — relative, inside repo, so kept.
+	// e targets "d/x/../../secret" which textually cleans to repo/secret (inside),
+	// but on the filesystem d/x resolves to d/, so ../../secret escapes.
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "d"), 0o755))
+	require.NoError(t, os.Symlink(".", filepath.Join(repo, "d", "x")))
+	require.NoError(t, os.Symlink("d/x/../../secret", filepath.Join(repo, "e")))
+
+	require.NoError(t, sanitizeDownload(repo))
+
+	_, err := os.Lstat(filepath.Join(repo, "e"))
+	assert.True(t, os.IsNotExist(err), "dir-symlink indirection escape should have been removed")
+}
+
 func TestSanitizeDownload_RemovesGitHooks(t *testing.T) {
 	dir := t.TempDir()
 
