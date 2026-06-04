@@ -2,7 +2,8 @@
 .PHONY: help bootstrap lint lint-all check fmt \
        mindmap go-build go-test go-lint go-fmt go-vet go-tidy \
        lint-md-links script-test test \
-       e2e-test e2e-playwright e2e-export-session e2e-upload-session
+       e2e-test e2e-playwright e2e-export-session e2e-upload-session \
+       functional-tests
 
 # Let Go automatically download the toolchain version required by go.mod.
 # This ensures local builds use the right version without manual intervention.
@@ -30,6 +31,7 @@ help:
 	@echo "  e2e-test             - Run admin e2e tests (requires E2E_GITHUB_SESSION_FILE or E2E_GITHUB_USERNAME + E2E_GITHUB_PASSWORD)"
 	@echo "  e2e-export-session   - Login to GitHub and export a Playwright session file"
 	@echo "  e2e-upload-session   - Export session and upload it as a GitHub repo secret"
+	@echo "  functional-tests     - Run functional agent tests (requires EVAL_ORG, FULLSEND_DIR, GH_TOKEN, GCP creds)"
 
 # Install all development tools needed for linting, formatting, and pre-commit hooks.
 # Prerequisites: uv (https://docs.astral.sh/uv/) and go (https://go.dev/)
@@ -149,3 +151,14 @@ e2e-playwright:
 		echo "==> Installing Playwright Chromium..."; \
 		go run github.com/playwright-community/playwright-go/cmd/playwright install chromium; \
 	fi
+
+# Functional agent evals — run agents against ephemeral GitHub repos and judge results.
+# Required env: EVAL_ORG (GitHub org for ephemeral repos), plus GCP creds for Vertex AI.
+# GH_TOKEN defaults to `gh auth token` if not set.
+FULLSEND_DIR ?= $(CURDIR)/internal/scaffold/fullsend-repo
+EVAL_AGENTS  ?= triage
+
+functional-tests:
+	@for agent in $(EVAL_AGENTS); do \
+		FULLSEND_DIR="$(FULLSEND_DIR)" ./eval/run-functional.sh "$$agent"; \
+	done
