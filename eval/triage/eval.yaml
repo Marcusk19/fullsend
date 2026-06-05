@@ -118,6 +118,20 @@ judges:
           return False, f"Missing labels: {missing} (actual: {actual})"
       return True, f"All required labels present: {required}"
 
+  - name: forbidden_labels
+    description: Labels listed in annotations.yaml forbidden list must NOT be present
+    check: |
+      import json
+      state = json.loads(outputs["files"]["output/fixture-state.json"])
+      actual = [l.lower() for l in state.get("labels", [])]
+      forbidden = outputs.get("annotations", {}).get("labels", {}).get("forbidden", [])
+      if not forbidden:
+          return True, "No forbidden labels specified"
+      present = [l for l in forbidden if l.lower() in actual]
+      if present:
+          return False, f"Forbidden labels present: {present} (actual: {actual})"
+      return True, f"No forbidden labels found (checked: {forbidden})"
+
   - name: max_turns
     description: Agent must complete within the declared turn budget
     check: |
@@ -163,6 +177,8 @@ thresholds:
     # code instead of accepting issue descriptions at face value.
     min_mean: 2.5
   required_labels:
+    min_pass_rate: 0.9
+  forbidden_labels:
     min_pass_rate: 0.9
   max_turns:
     min_pass_rate: 1.0

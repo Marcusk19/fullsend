@@ -28,7 +28,7 @@ if [[ ! -f "$EVAL_YAML" ]]; then
   echo "FAIL: eval.yaml not found: $EVAL_YAML"
   ERRORS=$((ERRORS + 1))
 else
-  for judge in max_turns max_cost; do
+  for judge in max_turns max_cost forbidden_labels; do
     if ! yq -e ".judges[] | select(.name == \"${judge}\")" "$EVAL_YAML" >/dev/null 2>&1; then
       echo "FAIL: eval.yaml missing required judge: ${judge}"
       ERRORS=$((ERRORS + 1))

@@ -78,6 +78,20 @@ if ! git -C "$TARGET_DIR" diff --cached --quiet; then
   git -C "$TARGET_DIR" push origin HEAD
 fi
 
+# --- Create seed issues (if any) ---
+SEED_COUNT=$(yq -r '.seed_issues // [] | length' "$INPUT")
+if [[ "$SEED_COUNT" -gt 0 ]]; then
+  for i in $(seq 0 $((SEED_COUNT - 1))); do
+    seed_title=$(yq -r ".seed_issues[$i].title" "$INPUT")
+    seed_body=$(yq -r ".seed_issues[$i].body" "$INPUT")
+    seed_url=$(gh issue create \
+      --repo "$EPHEMERAL_REPO" \
+      --title "$seed_title" \
+      --body "$seed_body")
+    echo "Created seed issue: $seed_url"
+  done
+fi
+
 # --- Create fixture ---
 FIXTURE_URL=""
 FIXTURE_NUMBER=""
