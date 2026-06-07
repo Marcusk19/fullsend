@@ -1,12 +1,22 @@
 ---
+title: "43. Behaviour tests with Gherkin and pluggable drivers"
 status: Accepted
-date: 2026-06-07
 relates_to:
   - agent-infrastructure
   - agent-architecture
+topics:
+  - e2e
+  - testing
+  - behaviour-tests
 ---
 
-# Behaviour tests with Gherkin and pluggable drivers
+# 43. Behaviour tests with Gherkin and pluggable drivers
+
+Date: 2026-06-07
+
+## Status
+
+Accepted
 
 ## Context
 
