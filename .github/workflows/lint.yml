@@ -38,6 +38,19 @@ jobs:
 
       - run: make test
 
+  test-macos:
+    # Run Go tests on macOS to exercise darwin-specific behavior (e.g. bsdtar
+    # AppleDouble suppression via COPYFILE_DISABLE=1 in UploadDir).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go test -race ./internal/sandbox/...
+
   commit-lint:
     # On pull_request: lint the PR title (which becomes the merge commit
     # subject on squash-merge). On push/merge_group: lint each commit.
