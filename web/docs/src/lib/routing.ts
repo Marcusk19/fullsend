@@ -42,7 +42,7 @@ export function navigateToRouteKey(
 
 export function defaultRouteKeyFromKeys(keys: string[]): string | null {
   const sorted = [...keys].sort((a, b) => a.localeCompare(b));
-  const vision = sorted.find((k) => k === "vision");
+  const vision = sorted.find((k) => k === "README");
   if (vision) return vision;
   return sorted[0] ?? null;
 }

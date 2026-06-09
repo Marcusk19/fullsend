@@ -4,92 +4,103 @@ import path from "node:path";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
-import matter from "gray-matter";
-import type { Root as MdastRoot } from "mdast";
+import type { Root as MdastRoot, List, ListItem, Link, Text } from "mdast";
 import {
   listDocMarkdownFiles,
   filePathToRouteKey,
   type DocsFilePath,
 } from "./paths";
-import { markdownToHtml, extractTitle } from "./markdown";
+import { markdownToHtml } from "./markdown";
 
 const VIRTUAL_BOOTSTRAP = "\0virtual:fullsend-docs";
 const VIRTUAL_BOOTSTRAP_PUBLIC = "virtual:fullsend-docs";
 const PAGE_PREFIX = "virtual:fullsend-docs/page/";
 const PAGE_INTERNAL_PREFIX = "\0fullsend-docs-page:";
+const SIDEBAR_PATH = "docs/sidebar.md" as const;
 
 export type ManifestNode =
   | { type: "dir"; name: string; children: ManifestNode[] }
   | { type: "file"; name: string; routeKey: string; title: string };
 
-type FileNode = Extract<ManifestNode, { type: "file" }>;
+/**
+ * Parse docs/sidebar.md into a ManifestNode tree.
+ * Each list item is either:
+ *   - a link → file node (url is the docs-relative path, e.g. "guides/README.md")
+ *   - plain text + nested list → dir node
+ * Throws if the markdown structure is unexpected.
+ */
+function parseSidebarMarkdown(sidebarMd: string): ManifestNode[] {
+  const mdast = unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .parse(sidebarMd) as MdastRoot;
 
-/** Internal tree nodes use a `Map` for dirs; manifest output uses arrays. */
-type DirNode = {
-  children: Map<string, DirNode | FileNode>;
-};
-
-function buildTree(
-  paths: { routeKey: string; title: string; segments: string[] }[],
-): ManifestNode[] {
-  const root: DirNode = { children: new Map() };
-
-  function ensureDir(d: DirNode, name: string): DirNode {
-    const existing = d.children.get(name);
-    if (existing) {
-      if ("routeKey" in existing) {
-        throw new Error(`path conflict: ${name} is both file and directory`);
-      }
-      return existing;
-    }
-    const next: DirNode = { children: new Map() };
-    d.children.set(name, next);
-    return next;
+  const topList = mdast.children.find((n) => n.type === "list") as
+    | List
+    | undefined;
+  if (!topList) {
+    throw new Error("sidebar.md: expected a top-level list");
   }
 
-  for (const p of paths) {
-    let d = root;
-    const segs = p.segments;
-    for (let i = 0; i < segs.length - 1; i++) {
-      d = ensureDir(d, segs[i]!);
-    }
-    const leafName = segs[segs.length - 1]!;
-    const fileNode: FileNode = {
-      type: "file",
-      name: leafName,
-      routeKey: p.routeKey,
-      title: p.title,
-    };
-    if (d.children.has(leafName)) {
-      const existing = d.children.get(leafName);
-      if (existing && !("routeKey" in existing)) {
-        throw new Error(`path conflict: ${leafName} is both file and directory`);
-      }
-    }
-    d.children.set(leafName, fileNode);
-  }
+  function processItem(item: ListItem): ManifestNode {
+    const para = item.children.find((c) => c.type === "paragraph");
+    const nestedList = item.children.find((c) => c.type === "list") as
+      | List
+      | undefined;
 
-  function toManifest(dir: DirNode): ManifestNode[] {
-    const entries = [...dir.children.entries()].sort(([a], [b]) =>
-      a.localeCompare(b),
+    if (!para) {
+      throw new Error("sidebar.md: list item has no paragraph");
+    }
+
+    const firstChild = (para as unknown as { children: { type: string }[] })
+      .children[0];
+
+    if (firstChild?.type === "link") {
+      const link = firstChild as unknown as Link;
+      const url = link.url;
+      if (!url.endsWith(".md")) {
+        throw new Error(`sidebar.md: link url must end with .md, got: ${url}`);
+      }
+      const routeKey = url.slice(0, -".md".length);
+      const namePart = routeKey.split("/").at(-1)!;
+      const linkText = link.children
+        .filter((c) => c.type === "text")
+        .map((c) => (c as unknown as Text).value)
+        .join("");
+      const title = linkText || namePart;
+      return { type: "file", name: namePart, routeKey, title };
+    }
+
+    if (firstChild?.type === "text") {
+      const name = (firstChild as unknown as Text).value.trim();
+      if (!nestedList) {
+        throw new Error(
+          `sidebar.md: dir entry "${name}" has no nested list — did you mean to add a link?`,
+        );
+      }
+      const children = nestedList.children.map(processItem);
+      return { type: "dir", name, children };
+    }
+
+    throw new Error(
+      `sidebar.md: unexpected list item content type: ${firstChild?.type ?? "none"}`,
     );
-    const dirNodes: ManifestNode[] = [];
-    const fileNodes: ManifestNode[] = [];
-    for (const [name, ch] of entries) {
-      if ("routeKey" in ch) {
-        fileNodes.push(ch);
-      } else {
-        dirNodes.push({
-          type: "dir",
-          name,
-          children: toManifest(ch),
-        });
-      }
-    }
-    return [...dirNodes, ...fileNodes];
   }
 
-  return toManifest(root);
+  return topList.children.map(processItem);
+}
+
+/** Collect all file routeKeys from a ManifestNode tree. */
+function collectRouteKeys(nodes: ManifestNode[]): string[] {
+  const keys: string[] = [];
+  for (const n of nodes) {
+    if (n.type === "file") {
+      keys.push(n.routeKey);
+    } else {
+      keys.push(...collectRouteKeys(n.children));
+    }
+  }
+  return keys;
 }
 
 function isRepoDocMarkdownFile(repoRoot: string, filePath: string): boolean {
@@ -99,24 +110,6 @@ function isRepoDocMarkdownFile(repoRoot: string, filePath: string): boolean {
   if (!normalized.startsWith(prefix)) return false;
   const ext = path.extname(normalized);
   return ext === ".md" || ext === ".markdown";
-}
-
-function manifestMetaForFile(
-  md: string,
-  f: DocsFilePath,
-): { routeKey: string; title: string; segments: string[] } {
-  const routeKey = filePathToRouteKey(f);
-  const { content } = matter(md);
-  const mdast = unified()
-    .use(remarkParse)
-    .use(remarkGfm)
-    .parse(content) as MdastRoot;
-  const title = extractTitle(mdast, routeKey);
-  return {
-    routeKey,
-    title,
-    segments: routeKey.split("/").filter(Boolean),
-  };
 }
 
 function generateLoadPageSource(sortedRouteKeys: string[]): string {
@@ -140,18 +133,32 @@ ${cases}
 }
 
 async function loadBootstrapModule(repoRoot: string): Promise<string> {
-  const files = listDocMarkdownFiles(repoRoot);
-  const meta: { routeKey: string; title: string; segments: string[] }[] = [];
-
-  for (const f of files) {
-    const abs = path.join(repoRoot, f);
-    const md = fs.readFileSync(abs, "utf8");
-    meta.push(manifestMetaForFile(md, f));
+  const sidebarAbs = path.join(repoRoot, SIDEBAR_PATH);
+  if (!fs.existsSync(sidebarAbs)) {
+    throw new Error(
+      `docs/sidebar.md not found. Create it to define the sidebar order.`,
+    );
   }
 
-  meta.sort((a, b) => a.routeKey.localeCompare(b.routeKey));
-  const manifest = buildTree(meta);
-  const sortedKeys = meta.map((m) => m.routeKey);
+  // Read all markdown files, excluding sidebar.md itself.
+  const allFiles = listDocMarkdownFiles(repoRoot).filter(
+    (f) => f !== SIDEBAR_PATH,
+  );
+
+  const sidebarMd = fs.readFileSync(sidebarAbs, "utf8");
+  const manifest = parseSidebarMarkdown(sidebarMd);
+
+  // Verify every file on disk is listed in sidebar.md.
+  const listedKeys = new Set(collectRouteKeys(manifest));
+  const allKeys = allFiles.map((f) => filePathToRouteKey(f));
+  const unlisted = allKeys.filter((k) => !listedKeys.has(k));
+  if (unlisted.length > 0) {
+    throw new Error(
+      `sidebar.md is missing the following files:\n${unlisted.map((k) => `  docs/${k}.md`).join("\n")}`,
+    );
+  }
+
+  const sortedKeys = [...listedKeys].sort((a, b) => a.localeCompare(b));
 
   return `export const manifest = ${JSON.stringify(manifest)};
 ${generateLoadPageSource(sortedKeys)}
