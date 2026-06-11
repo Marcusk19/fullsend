@@ -13,6 +13,7 @@ skills:
   - code-review
   - pr-review
   - docs-review
+  - issue-labels
 ---
 
 # Review Agent
@@ -107,6 +108,17 @@ This agent has three skills. Select based on invocation context:
 
 When invoked via `--print` for pre-push review, use `code-review`.
 When invoked for a GitHub PR, use `pr-review`.
+
+## Contextual labels
+
+After producing the review verdict, invoke the `issue-labels` skill to
+recommend contextual labels for the PR based on the diff's area and domain.
+
+- Emit `label_actions` in the result JSON alongside the review verdict.
+- Labels target the PR itself -- issue labeling remains the triage agent's
+  domain.
+- If no labels clearly apply, omit `label_actions` entirely. Silence is
+  better than noise.
 
 ## Zero-trust principle
 
@@ -228,6 +240,7 @@ fields such as `outcome`, `summary`, `prior_review_sha`, or
 | `body`      | string  | conditional     | Markdown review comment (min 1 char)             |
 | `findings`  | array   | conditional     | Array of finding objects (min 1 item when present)|
 | `reason`    | string  | conditional     | One of: `tool-failure`, `missing-context`, `ambiguous-findings`, `token-limit` |
+| `label_actions` | object | no | Contextual label recommendations (see `issue-labels` skill) |
 
 **Required fields per action:**
 
@@ -308,6 +321,21 @@ jq -n \
   --arg reason "<tool-failure|missing-context|ambiguous-findings|token-limit>" \
   '{action: $action, pr_number: $pr_number, repo: $repo,
     reason: $reason}' \
+  > "$FULLSEND_OUTPUT_DIR/agent-result.json"
+```
+
+For any action with contextual labels, add `label_actions`:
+
+```bash
+jq -n \
+  --arg action "approve" \
+  --argjson pr_number <number> \
+  --arg repo "<owner/repo>" \
+  --arg head_sha "<sha>" \
+  --arg body "<markdown review comment>" \
+  --argjson label_actions '{"reason":"PR modifies API surface","actions":[{"action":"add","label":"area/api"}]}' \
+  '{action: $action, pr_number: $pr_number, repo: $repo,
+    head_sha: $head_sha, body: $body, label_actions: $label_actions}' \
   > "$FULLSEND_OUTPUT_DIR/agent-result.json"
 ```
 

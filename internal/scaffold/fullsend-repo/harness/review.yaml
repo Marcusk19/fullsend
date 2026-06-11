@@ -12,6 +12,7 @@ skills:
   - skills/pr-review
   - skills/code-review
   - skills/docs-review
+  - skills/issue-labels
 
 pre_script: scripts/pre-review.sh
 
