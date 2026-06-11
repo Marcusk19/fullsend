@@ -1,5 +1,5 @@
 ---
-title: "44. Functional tests for agent pipelines"
+title: "46. Functional tests for agent pipelines"
 status: Accepted
 relates_to:
   - testing-agents
