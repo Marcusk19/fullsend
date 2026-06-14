@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/cucumber/godog"
 	"gopkg.in/yaml.v3"
 
+	"github.com/fullsend-ai/fullsend/e2e/behaviour/artifacts"
 	"github.com/fullsend-ai/fullsend/e2e/behaviour/world"
 	"github.com/fullsend-ai/fullsend/internal/runtime"
 )
@@ -99,19 +101,44 @@ func assertAgentFails(w *world.World, description string) error {
 }
 
 func assertAgentOutcome(w *world.World, description string, expectSuccess bool) error {
-	w.DummyExpectations = append(w.DummyExpectations, world.DummyOpExpectation{
-		Description:   strings.TrimSpace(description),
-		ExpectSuccess: expectSuccess,
-	})
-	return nil
+	if err := ensureArtifacts(w); err != nil {
+		return err
+	}
+	data, err := artifacts.FindBehaviourResults(w.ArtifactDir)
+	if err != nil {
+		return err
+	}
+	var results runtime.BehaviourResults
+	if err := json.Unmarshal(data, &results); err != nil {
+		return fmt.Errorf("parsing behaviour-results.json: %w", err)
+	}
+	description = strings.TrimSpace(description)
+	for _, res := range results.Operations {
+		if res.Description != description {
+			continue
+		}
+		if res.Success != expectSuccess {
+			return fmt.Errorf("operation %q: expected success=%v, got success=%v (error: %s)", description, expectSuccess, res.Success, res.Error)
+		}
+		return nil
+	}
+	return fmt.Errorf("operation %q not found in behaviour-results.json", description)
 }
 
 func assertAgentOutput(w *world.World, fileName, doc string) error {
-	w.OutputExpectations = append(w.OutputExpectations, world.OutputExpectation{
-		FileName: strings.TrimSpace(fileName),
-		Content:  strings.TrimSpace(doc),
-		Exact:    true,
-	})
+	if err := ensureArtifacts(w); err != nil {
+		return err
+	}
+	fileName = strings.TrimSpace(fileName)
+	data, err := artifacts.FindOutputFile(w.ArtifactDir, fileName)
+	if err != nil {
+		return err
+	}
+	actual := strings.TrimSpace(string(data))
+	expected := strings.TrimSpace(doc)
+	if actual != expected {
+		return fmt.Errorf("output file %q: expected %q, got %q", fileName, expected, actual)
+	}
 	return nil
 }
 

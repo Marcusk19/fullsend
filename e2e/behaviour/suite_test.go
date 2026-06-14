@@ -92,8 +92,6 @@ func initializeScenario(sc *godog.ScenarioContext, w *world.World) {
 		}
 		w.ScenarioStart = time.Now()
 		w.DummyOps = nil
-		w.DummyExpectations = nil
-		w.OutputExpectations = nil
 		w.IssueNumber = 0
 		w.IssueTitle = ""
 		w.WorkflowRun = nil

@@ -2,19 +2,14 @@ package steps
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
 
-	gaci "github.com/fullsend-ai/fullsend/e2e/behaviour/drivers/ci/githubactions"
 	scmgh "github.com/fullsend-ai/fullsend/e2e/behaviour/drivers/scm/github"
 	"github.com/fullsend-ai/fullsend/e2e/behaviour/world"
-	"github.com/fullsend-ai/fullsend/internal/forge"
-	"github.com/fullsend-ai/fullsend/internal/runtime"
 )
 
 func registerTriageSteps(ctx *godog.ScenarioContext, w *world.World) {
@@ -97,72 +92,7 @@ func whenMemberComments(w *world.World, comment string) error {
 }
 
 func thenTriageWorkflowCompletes(w *world.World) error {
-	ctx := context.Background()
-	run, err := w.CI.WaitForWorkflow(ctx, w.Org, forge.ConfigRepoName, "triage.yml", w.ScenarioStart)
-	if err != nil {
-		return err
-	}
-	w.WorkflowRun = run
-
-	artifactDir, err := os.MkdirTemp("", "behaviour-artifacts-*")
-	if err != nil {
-		return err
-	}
-	w.ArtifactDir = artifactDir
-	if err := w.CI.DownloadArtifacts(ctx, w.Org, forge.ConfigRepoName, run.ID, artifactDir); err != nil {
-		return err
-	}
-
-	if err := verifyDummyExpectations(w, artifactDir); err != nil {
-		return err
-	}
-	return verifyOutputExpectations(w, artifactDir)
-}
-
-func verifyDummyExpectations(w *world.World, artifactDir string) error {
-	data, err := gaci.FindBehaviourResults(artifactDir)
-	if err != nil {
-		return err
-	}
-	var results runtime.BehaviourResults
-	if err := json.Unmarshal(data, &results); err != nil {
-		return fmt.Errorf("parsing behaviour-results.json: %w", err)
-	}
-	byDescription := map[string]runtime.BehaviourOpResult{}
-	for _, res := range results.Operations {
-		byDescription[res.Description] = res
-	}
-	for _, exp := range w.DummyExpectations {
-		res, ok := byDescription[exp.Description]
-		if !ok {
-			return fmt.Errorf("operation %q not found in behaviour-results.json", exp.Description)
-		}
-		if res.Success != exp.ExpectSuccess {
-			return fmt.Errorf("operation %q: expected success=%v, got success=%v (error: %s)", exp.Description, exp.ExpectSuccess, res.Success, res.Error)
-		}
-	}
-	return nil
-}
-
-func verifyOutputExpectations(w *world.World, artifactDir string) error {
-	for _, exp := range w.OutputExpectations {
-		data, err := gaci.FindOutputFile(artifactDir, exp.FileName)
-		if err != nil {
-			return err
-		}
-		actual := strings.TrimSpace(string(data))
-		expected := strings.TrimSpace(exp.Content)
-		if exp.Exact {
-			if actual != expected {
-				return fmt.Errorf("output file %q: expected %q, got %q", exp.FileName, expected, actual)
-			}
-			continue
-		}
-		if !strings.Contains(actual, expected) {
-			return fmt.Errorf("output file %q: expected substring %q in %q", exp.FileName, expected, actual)
-		}
-	}
-	return nil
+	return ensureTriageWorkflowComplete(w)
 }
 
 func thenIssueHasLabel(w *world.World, label string) error {

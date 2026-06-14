@@ -46,6 +46,8 @@ Given a dummy agent that would:
 
 ### Assertion steps
 
+Each assertion verifies immediately against workflow artifacts. If the triage workflow has not been waited on yet, the step waits for completion and downloads artifacts first (same as `Then the triage workflow completes successfully`).
+
 ```gherkin
 Then the agent will succeed to Emit triage JSON
 And the agent will fail to Search for foo

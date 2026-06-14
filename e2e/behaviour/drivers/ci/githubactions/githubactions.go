@@ -186,66 +186,16 @@ func downloadArtifact(ctx context.Context, token, owner, repo string, artifactID
 		_ = os.MkdirAll(filepath.Dir(outPath), 0o755)
 		rc, err := f.Open()
 		if err != nil {
-			continue
+			return err
 		}
 		data, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
-			continue
+			return err
 		}
 		if err := os.WriteFile(outPath, data, 0o644); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// FindBehaviourResults locates behaviour-results.json in downloaded artifacts.
-func FindBehaviourResults(artifactRoot string) ([]byte, error) {
-	var found []byte
-	err := filepath.WalkDir(artifactRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Base(path) == "behaviour-results.json" {
-			data, readErr := os.ReadFile(path)
-			if readErr != nil {
-				return readErr
-			}
-			found = data
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if found == nil {
-		return nil, fmt.Errorf("behaviour-results.json not found under %s", artifactRoot)
-	}
-	return found, nil
-}
-
-// FindOutputFile searches artifact downloads for a sandbox output file by name.
-func FindOutputFile(artifactRoot, fileName string) ([]byte, error) {
-	var found []byte
-	err := filepath.WalkDir(artifactRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if filepath.Base(path) == fileName {
-			data, readErr := os.ReadFile(path)
-			if readErr != nil {
-				return readErr
-			}
-			found = data
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if found == nil {
-		return nil, fmt.Errorf("%s not found under %s", fileName, artifactRoot)
-	}
-	return found, nil
 }

@@ -10,19 +10,6 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/runtime"
 )
 
-// DummyOpExpectation records expected success/failure for a dummy agent operation.
-type DummyOpExpectation struct {
-	Description   string
-	ExpectSuccess bool
-}
-
-// OutputExpectation records expected sandbox output file content.
-type OutputExpectation struct {
-	FileName string
-	Content  string
-	Exact    bool
-}
-
 // World holds scenario state and injected drivers.
 type World struct {
 	Config env.RunnerConfig
@@ -38,15 +25,13 @@ type World struct {
 
 	ScenarioStart time.Time
 
-	DummyOps             []runtime.BehaviourOperation
-	DummyExpectations    []DummyOpExpectation
-	OutputExpectations   []OutputExpectation
-	BehaviourScriptPath  string
-	ArtifactDir          string
+	DummyOps            []runtime.BehaviourOperation
+	BehaviourScriptPath string
+	ArtifactDir         string
 
-	IssueNumber int
-	IssueTitle  string
-	WorkflowRun *forge.WorkflowRun
+	IssueNumber    int
+	IssueTitle     string
+	WorkflowRun    *forge.WorkflowRun
 	TriageWorkflow string
 }
 
