@@ -3,7 +3,6 @@ package steps
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -106,16 +105,4 @@ func thenIssueHasLabel(w *world.World, label string) error {
 		}
 	}
 	return fmt.Errorf("issue #%d labels %v do not include %q", w.IssueNumber, issue.Labels, label)
-}
-
-func CleanupScenario(w *world.World) {
-	ctx := context.Background()
-	if w.IssueNumber > 0 {
-		_ = w.SCM.CloseIssue(ctx, w.RepoOwner, w.RepoName, w.IssueNumber)
-	}
-	if w.ArtifactDir != "" {
-		_ = os.RemoveAll(w.ArtifactDir)
-	}
-	empty := []byte("ops: []\n")
-	_ = w.SCM.CommitFile(ctx, w.Org, ".fullsend", world.BehaviourScriptRepoPath, "behaviour: clear dummy agent script", empty)
 }

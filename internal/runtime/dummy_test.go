@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/fullsend-ai/fullsend/internal/sandbox"
 )
 
 func TestLoadBehaviourScript(t *testing.T) {
@@ -51,4 +53,42 @@ func TestResolveWriteFixtureMissingContent(t *testing.T) {
 		Args: "output/agent-result.json, fixtures/triage/sufficient.json",
 	})
 	require.Error(t, err)
+}
+
+func TestResolveSandboxPathWithinBase(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "workspace")
+	require.NoError(t, os.MkdirAll(base, 0o755))
+
+	got, err := resolveSandboxPath(base, "output/file.json")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(base, "output/file.json"), got)
+}
+
+func TestResolveSandboxPathRejectsEscape(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "workspace")
+	require.NoError(t, os.MkdirAll(base, 0o755))
+
+	_, err := resolveSandboxPath(base, "../outside")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes base")
+}
+
+func TestResolveSandboxPathRejectsAbsoluteOutsideWorkspace(t *testing.T) {
+	t.Parallel()
+
+	_, err := resolveSandboxPath(sandbox.SandboxWorkspace, "/etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes sandbox workspace")
+}
+
+func TestExecuteBehaviourOpUnknown(t *testing.T) {
+	t.Parallel()
+
+	err := executeBehaviourOp("unused", t.TempDir(), BehaviourOperation{Op: "nope"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown op")
 }

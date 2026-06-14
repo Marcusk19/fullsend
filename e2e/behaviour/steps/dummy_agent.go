@@ -14,6 +14,7 @@ import (
 
 	"github.com/fullsend-ai/fullsend/e2e/behaviour/artifacts"
 	"github.com/fullsend-ai/fullsend/e2e/behaviour/world"
+	"github.com/fullsend-ai/fullsend/internal/forge"
 	"github.com/fullsend-ai/fullsend/internal/runtime"
 )
 
@@ -84,7 +85,7 @@ func parseDummyAgentTable(w *world.World, table *godog.Table) error {
 	}
 
 	message := fmt.Sprintf("behaviour: set dummy agent script (%s)", time.Now().UTC().Format(time.RFC3339))
-	if err := w.SCM.CommitFile(context.Background(), w.Org, ".fullsend", world.BehaviourScriptRepoPath, message, data); err != nil {
+	if err := w.SCM.CommitFile(context.Background(), w.Org, forge.ConfigRepoName, world.BehaviourScriptRepoPath, message, data); err != nil {
 		return fmt.Errorf("committing behaviour script: %w", err)
 	}
 

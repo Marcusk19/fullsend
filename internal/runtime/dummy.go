@@ -77,6 +77,8 @@ func (r DummyRuntime) Run(params RunParams, printer *ui.Printer, _ time.Time, _ 
 		printer.StepWarn("Dummy runtime: " + execErr.Error())
 	}
 
+	// Non-zero exitCode mirrors ClaudeRuntime: run.go warns on non-zero exit but
+	// only aborts on a non-nil Go error (infrastructure failures).
 	exitCode := 0
 	for _, res := range results.Operations {
 		if !res.Success {
@@ -141,7 +143,10 @@ func executeBehaviourOp(sandboxName, repoDir string, op BehaviourOperation) erro
 		if path == "" {
 			return fmt.Errorf("read_file requires a path")
 		}
-		remotePath := resolveSandboxPath(repoDir, path)
+		remotePath, err := resolveSandboxPath(repoDir, path)
+		if err != nil {
+			return err
+		}
 		cmd := fmt.Sprintf("test -r %s", shellQuote(remotePath))
 		_, stderr, exitCode, err := sandbox.Exec(sandboxName, cmd, 30*time.Second)
 		if err != nil {
@@ -165,26 +170,17 @@ func executeBehaviourOp(sandboxName, repoDir string, op BehaviourOperation) erro
 			return fmt.Errorf("url_get failed: %s", strings.TrimSpace(stderr))
 		}
 		return nil
-	case "run_command":
-		command := strings.TrimSpace(op.Args)
-		if command == "" {
-			return fmt.Errorf("run_command requires a shell command")
-		}
-		_, stderr, exitCode, err := sandbox.Exec(sandboxName, command, 5*time.Minute)
-		if err != nil {
-			return fmt.Errorf("run_command exec: %w", err)
-		}
-		if exitCode != 0 {
-			return fmt.Errorf("run_command exited %d: %s", exitCode, strings.TrimSpace(stderr))
-		}
-		return nil
 	case "write_fixture":
 		dest, content, err := resolveWriteFixture(op)
 		if err != nil {
 			return err
 		}
-		remoteDest := resolveSandboxPath(sandbox.SandboxWorkspace, dest)
-		mkdirCmd := fmt.Sprintf("mkdir -p $(dirname %s)", shellQuote(remoteDest))
+		remoteDest, err := resolveSandboxPath(sandbox.SandboxWorkspace, dest)
+		if err != nil {
+			return err
+		}
+		parentDir := filepath.Dir(remoteDest)
+		mkdirCmd := fmt.Sprintf("mkdir -p %s", shellQuote(parentDir))
 		if _, _, _, err := sandbox.Exec(sandboxName, mkdirCmd, 10*time.Second); err != nil {
 			return fmt.Errorf("write_fixture mkdir: %w", err)
 		}
@@ -210,7 +206,7 @@ func executeBehaviourOp(sandboxName, repoDir string, op BehaviourOperation) erro
 func resolveWriteFixture(op BehaviourOperation) (dest string, content string, err error) {
 	parts := strings.SplitN(op.Args, ",", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("write_fixture args must be dest_path, fixture_path")
+		return "", "", fmt.Errorf("write_fixture args must be dest_path, fixture_path (fixture path is for test embedding; runtime uses op.content)")
 	}
 	dest = strings.TrimSpace(parts[0])
 	if dest == "" {
@@ -222,11 +218,21 @@ func resolveWriteFixture(op BehaviourOperation) (dest string, content string, er
 	return "", "", fmt.Errorf("write_fixture requires embedded content in script")
 }
 
-func resolveSandboxPath(base, rel string) string {
+func resolveSandboxPath(base, rel string) (string, error) {
+	baseClean := filepath.Clean(base)
 	if filepath.IsAbs(rel) || strings.HasPrefix(rel, sandbox.SandboxWorkspace) {
-		return rel
+		clean := filepath.Clean(rel)
+		wsClean := filepath.Clean(sandbox.SandboxWorkspace)
+		if clean != wsClean && !strings.HasPrefix(clean, wsClean+string(os.PathSeparator)) {
+			return "", fmt.Errorf("path %q escapes sandbox workspace", rel)
+		}
+		return rel, nil
 	}
-	return filepath.Join(base, rel)
+	resolved := filepath.Clean(filepath.Join(baseClean, rel))
+	if resolved != baseClean && !strings.HasPrefix(resolved, baseClean+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path %q escapes base %q", rel, base)
+	}
+	return resolved, nil
 }
 
 func writeBehaviourResults(sandboxName string, results BehaviourResults) error {

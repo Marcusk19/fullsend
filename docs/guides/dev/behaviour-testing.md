@@ -39,7 +39,7 @@ Given a dummy agent that would:
 | Column | Meaning |
 |--------|---------|
 | `description` | Human label matched by assertion steps |
-| `op` | `read_file`, `url_get`, `run_command`, `write_fixture` |
+| `op` | `read_file`, `url_get`, `write_fixture` |
 | `args` | Op-specific; see below |
 
 **`write_fixture`:** `dest_path, fixtures/...` — content lives in `e2e/behaviour/fixtures/`, embedded in the committed scenario script at `.fullsend/behaviour/current-scenario.yaml`.

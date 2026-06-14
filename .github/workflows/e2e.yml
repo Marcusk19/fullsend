@@ -99,6 +99,8 @@ jobs:
 
   behaviour:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -127,3 +129,13 @@ jobs:
           BEHAVIOUR_SCM: github
           BEHAVIOUR_CI: githubactions
           BEHAVIOUR_INSTALL_MODE: per-org
+          BEHAVIOUR_ARTIFACT_DIR: ${{ runner.temp }}/behaviour-artifacts
+
+      - name: Upload behaviour debug artifacts
+        if: failure() && steps.behaviour-secrets.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: behaviour-artifacts
+          path: ${{ runner.temp }}/behaviour-artifacts/
+          if-no-files-found: ignore
+          retention-days: 5

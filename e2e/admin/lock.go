@@ -1,4 +1,6 @@
 //go:build e2e || behaviour
+//
+// Shared org-pool helpers for admin e2e and behaviour tests (both use AcquireOrg).
 
 package admin
 

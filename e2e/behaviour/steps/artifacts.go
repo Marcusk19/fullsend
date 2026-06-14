@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/fullsend-ai/fullsend/e2e/behaviour/world"
 	"github.com/fullsend-ai/fullsend/internal/forge"
@@ -34,9 +35,15 @@ func ensureArtifacts(w *world.World) error {
 	if w.ArtifactDir != "" {
 		return nil
 	}
-	artifactDir, err := os.MkdirTemp("", "behaviour-artifacts-*")
-	if err != nil {
-		return err
+	artifactDir := strings.TrimSpace(os.Getenv("BEHAVIOUR_ARTIFACT_DIR"))
+	if artifactDir == "" {
+		var err error
+		artifactDir, err = os.MkdirTemp("", "behaviour-artifacts-*")
+		if err != nil {
+			return err
+		}
+	} else if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		return fmt.Errorf("creating behaviour artifact dir: %w", err)
 	}
 	ctx := context.Background()
 	if err := w.CI.DownloadArtifacts(ctx, w.Org, forge.ConfigRepoName, w.WorkflowRun.ID, artifactDir); err != nil {

@@ -55,11 +55,14 @@ func TestBehaviourSuite(t *testing.T) {
 		Env:       setup,
 		Org:       org,
 		Token:     token,
+		Logf:      t.Logf,
 		RepoOwner: org,
 		RepoName:  setup.TestRepo(),
 		RepoFull:  org + "/" + setup.TestRepo(),
 	}
 
+	// World is shared across scenarios; godog runs serially by default. Do not
+	// pass --concurrency without giving each scenario its own World in Before.
 	suite := godog.TestSuite{
 		Name:                "behaviour",
 		ScenarioInitializer: func(sc *godog.ScenarioContext) { initializeScenario(sc, w) },

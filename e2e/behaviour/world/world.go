@@ -22,6 +22,7 @@ type World struct {
 	RepoOwner string
 	RepoName  string
 	Token     string
+	Logf      func(string, ...any)
 
 	ScenarioStart time.Time
 

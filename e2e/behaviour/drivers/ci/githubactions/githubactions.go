@@ -21,7 +21,10 @@ const (
 	pollInterval   = 15 * time.Second
 	dispatchWait   = 12 * time.Minute
 	dispatchPoll   = 5 * time.Second
-	dispatchMaxTry = 12
+	dispatchMaxTry = 24
+
+	assertNoWorkflowChecks = 3
+	assertNoWorkflowDelay  = 10 * time.Second
 )
 
 // Driver implements ci.Driver against GitHub Actions.
@@ -85,17 +88,26 @@ func (d *Driver) WaitForWorkflow(ctx context.Context, owner, repo, workflowFile 
 }
 
 func (d *Driver) AssertNoWorkflow(ctx context.Context, owner, repo, workflowFile string, after time.Time) error {
-	runs, err := d.Client.ListWorkflowRuns(ctx, owner, repo, workflowFile)
-	if err != nil {
-		return err
-	}
-	for _, run := range runs {
-		runTime, parseErr := time.Parse(time.RFC3339, run.CreatedAt)
-		if parseErr != nil {
-			continue
+	for attempt := 0; attempt < assertNoWorkflowChecks; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(assertNoWorkflowDelay):
+			}
 		}
-		if !runTime.Before(after) {
-			return fmt.Errorf("unexpected workflow run %d for %s", run.ID, workflowFile)
+		runs, err := d.Client.ListWorkflowRuns(ctx, owner, repo, workflowFile)
+		if err != nil {
+			return err
+		}
+		for _, run := range runs {
+			runTime, parseErr := time.Parse(time.RFC3339, run.CreatedAt)
+			if parseErr != nil {
+				continue
+			}
+			if !runTime.Before(after) {
+				return fmt.Errorf("unexpected workflow run %d for %s", run.ID, workflowFile)
+			}
 		}
 	}
 	return nil
