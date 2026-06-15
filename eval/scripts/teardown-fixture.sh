@@ -13,4 +13,5 @@ fi
 
 if ! gh repo delete "$EPHEMERAL_REPO" --yes 2>&1; then
   echo "WARNING: failed to delete $EPHEMERAL_REPO — may need manual cleanup" >&2
+  echo "::warning::Ephemeral repo $EPHEMERAL_REPO was not deleted — manual cleanup required"
 fi
