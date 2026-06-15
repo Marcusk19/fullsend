@@ -59,6 +59,7 @@ type resultEvent struct {
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
 }
+
 // progressParser reads NDJSON from Claude Code's stream-json output and emits
 // progress updates via the printer. It extracts tool names and safe context
 // (binary name for Bash, file path for Read/Write/Edit) without logging
