@@ -867,6 +867,11 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 
 		if runErr != nil {
 			printer.StepFail("Agent execution failed")
+			// Write partial metrics before returning so downstream judges
+			// (e.g., max_turns, max_cost) can inspect what happened.
+			if err := writeMetricsJSON(runDir, aggMetrics); err != nil {
+				printer.StepWarn("Failed to write metrics.json: " + err.Error())
+			}
 			return fmt.Errorf("running agent (iteration %d): %w", iteration, runErr)
 		}
 		lastExitCode = exitCode

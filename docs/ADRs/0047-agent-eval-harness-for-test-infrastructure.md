@@ -45,7 +45,7 @@ or extending the harness with fullsend-specific code.
 ## Decision
 
 We adopt agent-eval-harness as the framework for fullsend functional tests.
-Fullsend's `eval/fullsend-runner.sh` implements the opaque CLI runner
+Fullsend's `eval/scripts/run-fullsend.sh` implements the opaque CLI runner
 contract — it accepts a workspace and output directory, runs `fullsend run`
 inside a sandbox, and writes captured fixture state to the output directory.
 Everything upstream (case iteration, judge invocation, scoring, thresholds)

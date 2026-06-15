@@ -11,5 +11,6 @@ if [[ -z "$EPHEMERAL_REPO" ]]; then
   exit 0
 fi
 
-gh repo delete "$EPHEMERAL_REPO" --yes 2>/dev/null || true
-echo "Deleted repo: $EPHEMERAL_REPO"
+if ! gh repo delete "$EPHEMERAL_REPO" --yes 2>&1; then
+  echo "WARNING: failed to delete $EPHEMERAL_REPO — may need manual cleanup" >&2
+fi

@@ -97,6 +97,7 @@ python3 "$WORKSPACE_PY" \
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Executing ==="
+exec_exit=0
 AGENT_EVAL_RUNS_DIR="$RUNS_BASE" \
   python3 "$EXECUTE_PY" \
     --workspace "/tmp/agent-eval/${RUN_ID}" \
@@ -104,7 +105,16 @@ AGENT_EVAL_RUNS_DIR="$RUNS_BASE" \
     --config "$EVAL_YAML" \
     --output "$RUN_DIR" \
     --run-id "$RUN_ID" \
-  || true  # don't abort on agent failures — we still want to score
+  || exec_exit=$?
+
+if [[ $exec_exit -ne 0 ]]; then
+  echo "WARNING: execute.py exited $exec_exit" >&2
+  # If no case produced output, this is an infrastructure failure — not an agent failure.
+  if [[ ! -d "$RUN_DIR/cases" ]] || [[ -z "$(ls "$RUN_DIR/cases/" 2>/dev/null)" ]]; then
+    echo "ERROR: no case output produced — infrastructure failure" >&2
+    exit 1
+  fi
+fi
 
 # Copy output artifacts from harness workspace to runs directory.
 # execute.py copies stdout/stderr/input but not the output/ subdirectory
