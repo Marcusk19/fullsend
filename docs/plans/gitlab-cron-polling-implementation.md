@@ -1,6 +1,6 @@
 # GitLab Cron-Polling Implementation Details
 
-This document contains implementation details for GitLab cron-polling event dispatch in fullsend. For the architectural decision and rationale, see [ADR 0047](../ADRs/0047-gitlab-cron-polling-event-dispatch.md). For the credential model, pipeline architecture, and other sections not covered here, see the GitLab per-repo support ADR ([PR #2042](https://github.com/fullsend-ai/fullsend/pull/2042)).
+This document contains implementation details for GitLab cron-polling event dispatch in fullsend. For the architectural decision and rationale, see [ADR 0047](../ADRs/0047-gitlab-cron-polling-event-dispatch.md).
 
 ## Table of Contents
 
@@ -26,8 +26,6 @@ Phase 3 (CI/CD templates) ──────────────────
 
 Phases 1 and 2 depend on Phase 0 (forge interface changes). Phase 3 (CI/CD templates) has no code dependency on Phase 0 and can start immediately. Phase 4 depends on Phase 1. Phase 5 depends on all prior phases.
 
-**Key difference from PR #2042 plan**: Phase 2 is a cron poller (Go package embedded in the fullsend container image) instead of a webhook bridge Cloud Function. This eliminates external infrastructure — no Cloud Function deployment, no webhook secrets, no trigger tokens.
-
 ## Phase 0: Forge Interface Preparation
 
 **Goal**: Prepare `forge.Client` for multi-forge support without breaking GitHub. Pure refactoring — no behavioral changes.
@@ -43,13 +41,7 @@ DeletePipelineSchedule(ctx context.Context, owner, repo, scheduleID string) erro
 UpdateVariable(ctx context.Context, owner, repo, key, value string) error
 ```
 
-### Methods NOT needed (vs PR #2042)
-
-The webhook bridge required these — they are no longer needed:
-
-- ~~`CreateWebhook`~~ — no webhooks
-- ~~`DeleteWebhook`~~ — no webhooks
-- ~~`TriggerPipeline`~~ — replaced by parent-child pipelines (GitLab-native, no forge method)
+These methods are forge-neutral by design. `IsProtectedBranch` maps to GitHub's branch protection API and GitLab's protected branches API. `CreatePipelineSchedule` and `DeletePipelineSchedule` are GitLab-native; the GitHub implementation returns `ErrNotSupported`. `UpdateVariable` maps to GitLab's CI/CD variable API.
 
 ### New sentinel error
 
@@ -59,7 +51,7 @@ var ErrNotSupported = errors.New("operation not supported by this forge")
 
 GitHub returns `ErrNotSupported` for `CreatePipelineSchedule`, `DeletePipelineSchedule`. GitLab returns it for `DispatchWorkflow`, `ListOrgInstallations`, `GetAppClientID`, and org-level secret/variable methods.
 
-**Caller handling**: Same audit approach as PR #2042 — `grep -rn 'MethodName' internal/` to build call-site inventory. The expected handling per call site:
+**Caller handling**: Audit all call sites via `grep -rn 'MethodName' internal/` to build a call-site inventory. Expected handling per call site:
 - `DispatchWorkflow` callers (dispatch layer): check for `ErrNotSupported`, fall back to schedule-based dispatch for GitLab
 - `CreateOrgSecret`/`OrgSecretExists` callers (secrets layer): skip with a log warning when `ErrNotSupported` — per-repo GitLab does not use org-level secrets
 - `ListOrgInstallations`/`GetAppClientID` callers (appsetup, CLI): already gated behind `GitHubExtensions` type-assertion, so `ErrNotSupported` is never reached
@@ -67,7 +59,7 @@ GitHub returns `ErrNotSupported` for `CreatePipelineSchedule`, `DeletePipelineSc
 
 ### Extension interface
 
-Same as PR #2042 — move GitHub-only methods to `GitHubExtensions`:
+Move GitHub-only methods to a `GitHubExtensions` interface:
 
 ```go
 type GitHubExtensions interface {
@@ -76,9 +68,11 @@ type GitHubExtensions interface {
 }
 ```
 
+Callers type-assert to access these methods. This keeps the core `forge.Client` interface forge-neutral.
+
 ### Forge detection
 
-Same as PR #2042 — new file `internal/forge/detect.go`:
+New file `internal/forge/detect.go`:
 
 ```go
 func DetectForge(remoteURL string) (string, error) {
@@ -120,49 +114,88 @@ func DetectForge(remoteURL string) (string, error) {
 
 **Goal**: Implement `internal/forge/gitlab/gitlab.go` with the full `forge.Client` interface.
 
-This phase is identical to PR #2042's Phase 1, with the following changes:
+### Constructor
 
-### Method mapping delta
+```go
+func New(token string, opts ...Option) (*LiveClient, error)
+```
 
-Methods that change vs PR #2042:
+Single-token constructor for the bot project access token. The token is used for all REST and GraphQL API calls. Options include `WithBaseURL(url)` for self-hosted instances (default: `https://gitlab.com`).
 
-| `forge.Client` method | PR #2042 | This plan | Notes |
-|---|---|---|---|
-| `CreateWebhook` | `ProjectHooks.AddProjectHook` | Removed from interface | No webhooks |
-| `DeleteWebhook` | `ProjectHooks.DeleteProjectHook` | Removed from interface | No webhooks |
-| `TriggerPipeline` | `PipelineTriggers.RunPipelineTrigger` | Removed from interface | Parent-child pipelines |
-| `CreatePipelineSchedule` | N/A | `PipelineSchedules.CreatePipelineSchedule` | New |
-| `DeletePipelineSchedule` | N/A | `PipelineSchedules.DeletePipelineSchedule` | New |
-| `UpdateVariable` | N/A | `ProjectVariables.UpdateVariable` | For poll watermark |
+### Full method mapping
 
-All other method mappings remain identical to PR #2042 Phase 1. See that document for the full method mapping table (50+ methods).
+| `forge.Client` method | GitLab SDK / API | Notes |
+|---|---|---|
+| `GetRepo` | `Projects.GetProject` | Returns project metadata |
+| `GetDefaultBranch` | `Projects.GetProject` → `DefaultBranch` | |
+| `GetCommit` | `Commits.GetCommit` | |
+| `ListCommits` | `Commits.ListCommits` | |
+| `CreateBranch` | `Branches.CreateBranch` | |
+| `DeleteBranch` | `Branches.DeleteBranch` | |
+| `GetBranch` | `Branches.GetBranch` | |
+| `GetFileContent` | `RepositoryFiles.GetFile` | Base64 decode content |
+| `ListFiles` | `Repositories.ListTree` | Recursive via `Recursive: true` |
+| `CreateOrUpdateFile` | `RepositoryFiles.CreateFile` / `UpdateFile` | Check existence first |
+| `CreatePR` | `MergeRequests.CreateMergeRequest` | MR, not PR |
+| `GetPR` | `MergeRequests.GetMergeRequest` | |
+| `ListPRs` | `MergeRequests.ListProjectMergeRequests` | |
+| `UpdatePR` | `MergeRequests.UpdateMergeRequest` | |
+| `MergePR` | `MergeRequests.AcceptMergeRequest` | |
+| `CreatePRComment` | `Notes.CreateMergeRequestNote` | Notes, not comments |
+| `ListPRComments` | `Notes.ListMergeRequestNotes` | |
+| `CreatePRReview` | Synthesized from notes + approvals | No native review object |
+| `RequestPRReviewers` | `MergeRequestApprovals.SetApprovers` | Approvers, not reviewers |
+| `ListPRReviews` | Synthesized from notes + approvals | |
+| `GetPRDiff` | `MergeRequests.GetMergeRequestDiff` | |
+| `AddLabels` | `MergeRequests.UpdateMergeRequest` or `Issues.UpdateIssue` | Labels in update payload |
+| `RemoveLabel` | Same as above | Full label list minus removed |
+| `CreateIssue` | `Issues.CreateIssue` | |
+| `GetIssue` | `Issues.GetIssue` | |
+| `ListIssues` | `Issues.ListProjectIssues` | |
+| `UpdateIssue` | `Issues.UpdateIssue` | |
+| `CreateIssueComment` | `Notes.CreateIssueNote` | |
+| `ListIssueComments` | `Notes.ListIssueNotes` | |
+| `CreateRepoSecret` | `ProjectVariables.CreateVariable` | With `Protected: true`, `Masked: true` |
+| `DeleteRepoSecret` | `ProjectVariables.RemoveVariable` | |
+| `CreateOrUpdateRepoVariable` | `ProjectVariables.CreateVariable` / `UpdateVariable` | |
+| `IsProtectedBranch` | `ProtectedBranches.GetProtectedBranch` | 404 → not protected |
+| `CreatePipelineSchedule` | `PipelineSchedules.CreatePipelineSchedule` | GitLab-specific |
+| `DeletePipelineSchedule` | `PipelineSchedules.DeletePipelineSchedule` | GitLab-specific |
+| `UpdateVariable` | `ProjectVariables.UpdateVariable` | For poll watermark |
+| `DispatchWorkflow` | → `ErrNotSupported` | GitHub-only |
+| `ListOrgInstallations` | → `GitHubExtensions` (not on base interface) | GitHub-only |
+| `GetAppClientID` | → `GitHubExtensions` (not on base interface) | GitHub-only |
+| `CreateOrgSecret` | → `ErrNotSupported` | Per-repo only |
+| `OrgSecretExists` | → `ErrNotSupported` | Per-repo only |
+| `GetLatestWorkflowRun` | → `ErrNotSupported` | GitHub Actions concept |
+| `ListWorkflowRuns` | → `ErrNotSupported` | GitHub Actions concept |
+| `CommitFiles` | `Commits.CreateCommit` | Multi-file commit |
+
+### Review synthesis
+
+GitLab has no native "review" object like GitHub's pull request review. Reviews are synthesized from:
+- **Notes** with suggestion blocks → "changes requested"
+- **Approval status** via `MergeRequestApprovals.GetConfiguration` → "approved"
+- **Discussion resolution status** → tracks whether feedback has been addressed
+
+The `CreatePRReview` method posts a note and optionally approves/unapproves the MR.
 
 ### Additional polling-support methods
 
-The forge client needs methods to support the poller's API queries. These are not on `forge.Client` (they are GitLab-specific internal methods on the client struct, not interface methods):
+These are internal methods on the client struct (not on `forge.Client`), used by the poller:
 
 ```go
-// ListIssuesUpdatedSince returns issues updated after the given timestamp.
 func (c *LiveClient) ListIssuesUpdatedSince(ctx context.Context, owner, repo string, since time.Time) ([]Issue, error)
-
-// ListMergeRequestsUpdatedSince returns MRs updated after the given timestamp.
 func (c *LiveClient) ListMergeRequestsUpdatedSince(ctx context.Context, owner, repo string, since time.Time) ([]MergeRequest, error)
-
-// ListProjectEvents returns project events filtered by target type after the given date.
 func (c *LiveClient) ListProjectEvents(ctx context.Context, owner, repo string, targetType string, after time.Time) ([]Event, error)
-
-// ListIssueNotes returns notes on a specific issue.
 func (c *LiveClient) ListIssueNotes(ctx context.Context, owner, repo string, issueIID int) ([]Note, error)
-
-// ListMergeRequestNotes returns notes on a specific merge request.
 func (c *LiveClient) ListMergeRequestNotes(ctx context.Context, owner, repo string, mrIID int) ([]Note, error)
-
-// GetVariable reads a CI/CD variable value.
 func (c *LiveClient) GetVariable(ctx context.Context, owner, repo, key string) (string, error)
-
-// UpdateVariable updates a CI/CD variable value.
-func (c *LiveClient) UpdateVariable(ctx context.Context, owner, repo, key, value string) error
 ```
+
+### Subgroup path handling
+
+GitLab supports deeply nested namespaces (`org/sub1/sub2/project`). The client must URL-encode the full project path for API calls, or use numeric project IDs. The `GetRepo` method resolves `owner/repo` to a project ID, and subsequent calls use the numeric ID.
 
 ### Files
 
@@ -173,9 +206,7 @@ func (c *LiveClient) UpdateVariable(ctx context.Context, owner, repo, key, value
 
 ## Phase 2: Cron Poller
 
-**Goal**: Implement the event polling logic that runs inside scheduled GitLab CI/CD pipelines.
-
-This phase replaces PR #2042's Phase 2 (Webhook Bridge Cloud Function) entirely. Instead of an external Cloud Function, the poller is a Go package compiled into the `fullsend` binary and invoked via `fullsend poll`.
+**Goal**: Implement the event polling logic that runs inside scheduled GitLab CI/CD pipelines. The poller is a Go package compiled into the `fullsend` binary and invoked via `fullsend poll`. No external infrastructure is required — no Cloud Function, no webhook bridge, no separate deployment.
 
 ### Architecture
 
@@ -545,7 +576,7 @@ func (e RoutableEvent) Key() string {
 
 ### Label state tracking
 
-The poller needs to distinguish "label was just added" from "label was already present". Unlike webhooks (which include a `changes` object with previous/current labels), polling sees only current state.
+The poller needs to distinguish "label was just added" from "label was already present". Since polling sees only current state (no `changes` object like webhook payloads provide), label change detection is implemented client-side via state comparison.
 
 **Approach**: Store the set of previously-seen labels per issue in a CI/CD variable (`FULLSEND_LABEL_STATE`), encoded as JSON. On each poll, diff current labels against stored state. Only newly-appearing labels trigger routing.
 
@@ -606,11 +637,7 @@ func (p *Poller) updateWatermark(ctx context.Context, owner, repo string, t time
 
 ### Child pipeline dispatch (`dispatch.go`)
 
-The poller dispatches agent stages by writing a child pipeline trigger file. The parent pipeline (poll.yml) uses `trigger: include:` to start child pipelines.
-
-However, GitLab does not support dynamically triggering child pipelines from a script. The alternative: the poller writes dispatch instructions to a dotenv artifact, and downstream jobs in the same pipeline read them.
-
-**Approach**: The poller writes a JSON file listing dispatches, and a subsequent `dispatch-agents` job reads it and triggers child pipelines for each entry.
+The poller dispatches agent stages by generating a child pipeline YAML file. The parent pipeline (poll.yml) uses `trigger: include: artifact:` to start child pipelines from the generated YAML. This keeps everything within GitLab's native pipeline hierarchy without requiring trigger tokens.
 
 ```go
 type Dispatch struct {
@@ -632,36 +659,13 @@ func (p *Poller) dispatch(ctx context.Context, owner, repo, stage string, event 
         ResourceKey:    fmt.Sprintf("%s-%d", event.Type, event.IID),
     }
 
-    // Append to dispatches file (read by dispatch-agents job)
+    // Append to dispatches file (read by generate-child-pipelines job)
     p.appendDispatch(dispatch)
     return nil
 }
 ```
 
-The polling pipeline's `dispatch-agents` job reads the dispatches file and triggers child pipelines using the GitLab API:
-
-```bash
-# For each dispatch in dispatches.json:
-while read -r dispatch; do
-    STAGE=$(echo "${dispatch}" | jq -r '.stage')
-    EVENT_TYPE=$(echo "${dispatch}" | jq -r '.event_type')
-    PAYLOAD_B64=$(echo "${dispatch}" | jq -r '.event_payload_b64')
-    RESOURCE_KEY=$(echo "${dispatch}" | jq -r '.resource_key')
-
-    curl --request POST \
-        --header "PRIVATE-TOKEN: ${FULLSEND_FORGE_TOKEN}" \
-        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/trigger/pipeline" \
-        --form "token=${CI_JOB_TOKEN}" \
-        --form "ref=${CI_DEFAULT_BRANCH}" \
-        --form "variables[STAGE]=${STAGE}" \
-        --form "variables[EVENT_TYPE]=${EVENT_TYPE}" \
-        --form "variables[EVENT_PAYLOAD_B64]=${PAYLOAD_B64}" \
-        --form "variables[RESOURCE_KEY]=${RESOURCE_KEY}" \
-        --form "variables[POLL_DISPATCHED]=true"
-done < <(jq -c '.[]' dispatches.json)
-```
-
-**Alternative approach**: Instead of triggering separate pipelines, the poller could use GitLab's `trigger: include:` mechanism with dynamic child pipelines. This avoids the need for trigger tokens but requires generating a child pipeline YAML file dynamically:
+**Child pipeline YAML generation:**
 
 ```go
 func (p *Poller) generateChildPipelineYAML(dispatches []Dispatch) string {
@@ -683,8 +687,6 @@ func (p *Poller) generateChildPipelineYAML(dispatches []Dispatch) string {
 }
 ```
 
-This YAML is written as a job artifact, and a downstream `trigger` job uses `trigger: include: artifact:` to launch the child pipelines. This is the preferred approach — it keeps everything within GitLab's native pipeline hierarchy without requiring trigger tokens.
-
 ### Files
 
 | Action | Path |
@@ -696,17 +698,6 @@ This YAML is written as a job artifact, and a downstream `trigger` job uses `tri
 | Create | `internal/poll/dispatch.go` (~150 lines) |
 | Create | `internal/poll/state.go` (~80 lines) |
 | Modify | `internal/cli/root.go` — add `poll` subcommand |
-
-### What's NOT needed (vs PR #2042 Phase 2)
-
-- ~~`internal/bridge/`~~ — no webhook bridge
-- ~~`internal/bridge/go.mod`~~ — no separate module
-- ~~`internal/dispatch/gcf/provisioner.go` changes~~ — no `ProvisionBridge`
-- ~~`internal/dispatch/dispatch.go` changes~~ — no `ProvisionBridge` on `Dispatcher` interface
-- ~~Webhook secret generation~~ — no webhooks
-- ~~Trigger token management~~ — no trigger tokens
-- ~~`crypto/subtle.ConstantTimeCompare`~~ — no shared secrets to validate
-- ~~Replay protection cache~~ — polling is inherently idempotent
 
 ## Phase 3: GitLab CI/CD Templates
 
@@ -772,7 +763,7 @@ workflow:
 
 ### MR dispatch (`.gitlab/ci/dispatch.yml`)
 
-Handles native MR events — identical to ADR 0047 Section 4:
+Handles native MR events — routes `merge_request_event` pipelines to the appropriate agent stage:
 
 ```yaml
 # fullsend-stage: dispatch (MR events only)
@@ -913,7 +904,7 @@ dispatch-agents:
 
 ### Stage pipeline template (`.gitlab/ci/code.yml`)
 
-Same as PR #2042 — all stages use the same OIDC/WIF credential flow. The only change is the trigger source: events arrive via parent pipeline variables (from the poller's child pipeline) or via native MR event dispatch, instead of via the webhook bridge.
+All stages use the same OIDC/WIF credential flow. Events arrive via parent pipeline variables (from the poller's child pipeline) or via native MR event dispatch.
 
 ```yaml
 # fullsend-stage: code
@@ -979,7 +970,7 @@ code:
 
 ### Stage-specific notes
 
-**fix**: Adds fork MR protection — same as PR #2042:
+**fix**: Adds fork MR protection:
 ```yaml
     - |
       # Fork MR protection
@@ -991,9 +982,7 @@ code:
       fi
 ```
 
-**review** (via native CI dispatch): Receives `$STAGE` from `dispatch.yml`'s dotenv artifact. Same credential flow.
-
-**review** (via MR event): When triggered by `merge_request_event`, `CI_MERGE_REQUEST_IID` and other MR variables are available directly from GitLab — no event payload decoding needed. The stage template detects the source and adapts:
+**review** (via native MR event): When triggered by `merge_request_event`, `CI_MERGE_REQUEST_IID` and other MR variables are available directly from GitLab — no event payload decoding needed. The stage template detects the source and adapts:
 ```yaml
     - |
       if [ "${CI_PIPELINE_SOURCE}" = "merge_request_event" ]; then
@@ -1035,16 +1024,7 @@ On `fullsend admin install`:
 - `--poll-interval` — cron schedule for polling (default: auto-detect from tier)
 - `--skip-schedule-create` — skip pipeline schedule creation (for externally managed schedules)
 
-### Removed flags (vs PR #2042)
-
-- ~~`--bridge-project`~~ — no bridge
-- ~~`--bridge-region`~~ — no bridge
-- ~~`--skip-bridge-deploy`~~ — no bridge
-- ~~`--bridge-url`~~ — no bridge
-
 ### Token resolution
-
-Same as PR #2042:
 
 ```go
 func resolveGitLabToken() (string, error) {
@@ -1067,7 +1047,7 @@ func resolveGitLabToken() (string, error) {
 
 ### Per-repo enforcement
 
-Same as PR #2042 — `fullsend admin install testgroup --forge gitlab` returns an error.
+`fullsend admin install testgroup --forge gitlab` returns an error: "GitLab installation supports per-repo mode only. Provide a group/project path."
 
 ### GitLab per-repo install flow
 
@@ -1142,12 +1122,11 @@ func runGitLabPerRepoInstall(ctx context.Context, target string, opts installOpt
         time.Now().Format(time.RFC3339))
 
     // 13. Set up inference WIF (if --inference-project provided)
-    // Same as GitHub per-repo
 
     // 14. Print CI minute warning for shared runners
     if tier == "free" {
         log.Warn("Free tier detected. Polling will consume CI minutes on shared runners. " +
-            "Consider using self-hosted runners. See ADR 0047 Section 5 for details.")
+            "Consider using self-hosted runners. See ADR 0047 Section 6 for details.")
     }
 }
 ```
@@ -1277,7 +1256,7 @@ workflow:
 
 **File**: `internal/forge/gitlab/gitlab.go`
 
-Same as PR #2042 — when creating CI/CD variables for secrets, the `Protected` flag MUST be `true`.
+When creating CI/CD variables for secrets, the `Protected` flag MUST be `true`. Protected variables are only exposed to pipelines running on protected branches.
 
 **Consequence of bug**: Any pipeline (including on MR branches with attacker-modified `.gitlab-ci.yml`) can see WIF configuration. With `CI_DEBUG_TRACE`, this could enable OIDC token replay within the ~5 minute TTL.
 
@@ -1285,7 +1264,7 @@ Same as PR #2042 — when creating CI/CD variables for secrets, the `Protected` 
 
 **Files**: All CI/CD template YAML files, `internal/cli/admin.go`
 
-Same as PR #2042 — every stage pipeline must exit early if debug tracing is detected.
+Every stage pipeline must exit early if debug tracing is detected. This prevents credential leakage through verbose job logs.
 
 ### 4. Fork MR blocking
 

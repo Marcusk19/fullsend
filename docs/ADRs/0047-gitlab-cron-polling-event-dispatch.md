@@ -1,7 +1,6 @@
 ---
 title: "47. GitLab cron-polling event dispatch"
 status: Accepted
-supersedes: "GitLab per-repo support via OIDC/WIF and webhook bridge (PR #2042, webhook bridge sections only)"
 relates_to:
   - agent-infrastructure
   - agent-architecture
@@ -23,33 +22,35 @@ Date: 2026-06-13
 
 Accepted
 
-Supersedes the webhook bridge sections (Sections 2, 4, and Security Layers 1, 3, 6) of the GitLab per-repo support ADR ([PR #2042](https://github.com/fullsend-ai/fullsend/pull/2042)). All other sections of that ADR — credential model (Section 1), pipeline architecture (Section 3), config layering (Section 5), repo layout (Section 6), CLI support (Section 7), forge abstraction (Section 8), and Security Layers 2, 4, 5, 7 — remain in effect.
-
 ## Context
 
-ADR 0043 designed GitLab event dispatch around a webhook bridge Cloud Function: GitLab sends webhook POST requests to a GCP Cloud Function, which translates them into Pipeline Trigger API calls with `ref=main` hardcoded. This was the best available analog to GitHub's `pull_request_target` — ensuring agent pipelines always run trusted code from the protected default branch.
+Fullsend needs a mechanism to detect and react to GitLab events — new issues, merge requests, comments, and label changes — so that agent stages (triage, code, review, fix, retro) can be dispatched automatically. On GitHub, native event triggers (`pull_request_target`, `issues`, `issue_comment`) handle this natively within GitHub Actions. GitLab has no equivalent mechanism for most event types.
 
-Team discussion raised a fundamental question: if we already have to operate the webhook bridge, why not use webhooks for everything? The answer exposed the real issue — the webhook bridge is external infrastructure that must be deployed, monitored, and secured regardless of how many event types it handles. The hybrid model (webhooks for some events, native CI for MR events) is two systems to operate, not one.
+GitLab's CI/CD model supports the following pipeline trigger sources: `push`, `merge_request_event`, `schedule`, `trigger`, `web`, `api`, and `parent_pipeline`. Of these, only `merge_request_event` maps directly to an agent-relevant event type. Issue creation, comment posting, and label changes have no native CI pipeline trigger — GitLab's `CI_PIPELINE_SOURCE` has no `issues` or `note` value.
 
-Barak Korren proposed a simpler alternative: **replace the webhook bridge entirely with cron-based polling**. Scheduled pipelines wake up every N minutes, query the GitLab API for new events since the last poll, and dispatch agent stages for anything that needs attention. Review and fix agents continue to trigger natively from `.gitlab-ci.yml` on MR events (using `include: project: ref: main` for trusted dispatch), while triage, code, and retro agents run on the polled event loop.
+Two architectural approaches were evaluated to fill this gap:
 
-This approach eliminates the webhook bridge entirely — no external Cloud Function, no public HTTP endpoint, no webhook secrets, no trigger tokens. The polling pipeline runs inside GitLab CI/CD on the protected default branch using the same OIDC/WIF credential flow established in ADR 0043.
+1. **Webhook bridge** — a GCP Cloud Function that receives GitLab webhook POST requests and translates them into Pipeline Trigger API calls. This requires deploying and maintaining external infrastructure, exposing a public HTTPS endpoint, and managing per-project webhook secrets and trigger tokens.
+
+2. **Cron-based polling** — scheduled GitLab CI/CD pipelines that wake up periodically, query the GitLab API for new events since the last poll, and dispatch agent stages via parent-child pipelines. This requires no external infrastructure and runs entirely within GitLab's native CI/CD system.
+
+GitLab supports per-repo installation mode only for fullsend (no per-org mode). The pipeline runs inside the enrolled project on the protected default branch. A bot project access token — retrieved at runtime via GitLab OIDC/GCP WIF from Secret Manager — serves as the single credential for all agent operations (REST, GraphQL, MR creation). See [ADR 0028](0028-gitlab-support.md) for the original GitLab support architecture discussion.
 
 ### Why cron polling over webhooks
 
-1. **No external infrastructure for event detection.** The webhook bridge is a GCP Cloud Function that must be deployed, monitored, scaled, and secured. Cron polling runs natively in GitLab CI/CD — the same infrastructure already running the agent pipelines.
+1. **No external infrastructure for event detection.** A webhook bridge is a GCP Cloud Function that must be deployed, monitored, scaled, and secured. Cron polling runs natively in GitLab CI/CD — the same infrastructure already running the agent pipelines.
 
-2. **No inbound attack surface.** The webhook bridge exposes a public HTTPS endpoint that accepts POST requests from the internet. Cron polling is entirely outbound — scheduled pipelines query the GitLab API. There is no listener, no endpoint to discover, no parser for untrusted external input at the event-detection layer.
+2. **No inbound attack surface.** A webhook bridge exposes a public HTTPS endpoint that accepts POST requests from the internet. Cron polling is entirely outbound — scheduled pipelines query the GitLab API. There is no listener, no endpoint to discover, no parser for untrusted external input at the event-detection layer.
 
 3. **Stronger event authenticity.** Webhook authentication relies on `X-Gitlab-Token`, a symmetric shared secret stored in Secret Manager. If leaked, an attacker can forge arbitrary events. Cron polling reads directly from the GitLab API — events are as authentic as GitLab's own database.
 
 4. **No event loss.** Webhooks can fail silently (network issues, bridge downtime, GitLab's auto-disable after 4 consecutive failures). Polling reads from the source of truth — events are only missed if created and deleted within a single poll interval.
 
-5. **Dramatically simpler for self-hosted GitLab.** The webhook bridge requires bidirectional network connectivity (GitLab → bridge, bridge → GitLab API). For self-hosted instances behind corporate firewalls, this means VPN peering, firewall rules, or on-premise container deployment. Cron polling requires only outbound HTTPS from GitLab runners to the GitLab API (already available by definition) and to GCP for credential retrieval (already required for inference).
+5. **Dramatically simpler for self-hosted GitLab.** A webhook bridge requires bidirectional network connectivity (GitLab → bridge, bridge → GitLab API). For self-hosted instances behind corporate firewalls, this means VPN peering, firewall rules, or on-premise container deployment. Cron polling requires only outbound HTTPS from GitLab runners to the GitLab API (already available by definition) and to GCP for credential retrieval (already required for inference).
 
 6. **Cleaner emergency shutdown.** Disabling a pipeline schedule or revoking the bot PAT in Secret Manager stops all agent activity. With webhooks, the bridge itself must be disabled, but queued or in-flight webhook deliveries may still arrive.
 
-7. **Fewer credentials to manage.** The webhook bridge requires three credential types per project (bot PAT, webhook secret, trigger token). Cron polling requires only the bot PAT — the same credential already needed for agent operations.
+7. **Fewer credentials to manage.** A webhook bridge requires three credential types per project (bot PAT, webhook secret, trigger token). Cron polling requires only the bot PAT — the same credential already needed for agent operations.
 
 ### What we give up
 
@@ -61,21 +62,21 @@ This approach eliminates the webhook bridge entirely — no external Cloud Funct
 
 ## Options
 
-### Alternative 1: Webhook bridge (ADR 0043 current design)
+### Alternative 1: Webhook bridge Cloud Function
 
-The existing design — a GCP Cloud Function translates webhook events to Pipeline Trigger API calls.
+Deploy a GCP Cloud Function that receives GitLab webhook POST requests, validates the `X-Gitlab-Token` header, and calls the GitLab Pipeline Trigger API with `ref=main` hardcoded to ensure agent pipelines always run trusted code from the protected default branch.
 
-**Rejected for this ADR**: Requires external infrastructure (Cloud Function), exposes a public HTTP endpoint, requires three credential types per project, and creates a complex deployment story for self-hosted GitLab. The bridge cannot be eliminated even in a hybrid model — if any event requires webhooks, the full bridge must be deployed and maintained.
+**Rejected**: Requires external infrastructure (Cloud Function) that must be deployed, monitored, and secured. Exposes a public HTTP endpoint — an inbound attack surface that does not exist in the polling model. Requires three credential types per project (bot PAT, webhook secret, trigger token) vs one for polling. Creates a complex deployment story for self-hosted GitLab instances behind corporate firewalls (VPN peering, on-premise container deployment, or Cloud Run + VPC Connector). The bridge cannot be eliminated even in a hybrid model — if any event type uses webhooks, the full bridge must be deployed and maintained.
 
 ### Alternative 2: Webhook-only (all events via bridge)
 
-Use the webhook bridge for all events, eliminating native CI triggers entirely.
+Use a webhook bridge for all events, eliminating native CI triggers entirely.
 
-**Rejected**: Still requires the bridge Cloud Function with all its operational complexity. Greg Allen's question ("if we have to use webhooks, why not use webhooks for everything?") correctly identified that the hybrid model is two systems to operate. But the answer is to eliminate the webhook bridge, not to go all-in on it.
+**Rejected**: Still requires the bridge Cloud Function with all its operational complexity. The question "if we have to use webhooks for some events, why not use webhooks for everything?" correctly identifies that a hybrid webhook+native model is two systems to operate. But the answer is to eliminate the webhook bridge entirely, not to go all-in on it.
 
 ### Alternative 3: Native MR events + webhook bridge for issues/comments
 
-Use GitLab's native `merge_request_event` pipeline source with `include: project: ref: main` for MR events. Keep the webhook bridge only for issue and comment events.
+Use GitLab's native `merge_request_event` pipeline source for MR events. Keep a webhook bridge only for issue and comment events (which have no native CI trigger).
 
 **Rejected**: Still requires the bridge Cloud Function, just for fewer event types. The bridge's operational cost is dominated by deployment, monitoring, and credential management — not by the number of event types it handles. Reducing scope does not meaningfully reduce complexity.
 
@@ -83,19 +84,19 @@ Use GitLab's native `merge_request_event` pipeline source with `include: project
 
 Pure cron polling — scheduled pipelines detect all events including MR creation and updates.
 
-**Rejected**: MR events have a viable native CI path (`merge_request_event` pipeline source + `include: project: ref: main`) that provides sub-minute latency with zero additional infrastructure. Polling for MR events adds unnecessary latency to the highest-frequency, most latency-sensitive operation (code review). The native path also ensures review pipelines trigger immediately when an MR is opened, which users expect from CI/CD-integrated tools.
+**Rejected**: MR events have a viable native CI path (`merge_request_event` pipeline source + `include: local: ref: main`) that provides sub-minute latency with zero additional infrastructure. Polling for MR events adds unnecessary latency to the highest-frequency, most latency-sensitive operation (code review). The native path also ensures review pipelines trigger immediately when an MR is opened, which users expect from CI/CD-integrated tools.
 
 ## Decision
 
 ### Overview
 
-Replace the webhook bridge from ADR 0043 with a two-path event dispatch model:
+GitLab event dispatch uses a two-path model:
 
-1. **Native CI triggers for MR events.** MR creation, update, and reopen trigger review pipelines via GitLab's `merge_request_event` pipeline source. The dispatch template is loaded via `include: project: ref: main` from a templates project (or `include: local:` from the enrolled project's protected default branch), ensuring untrusted MR branches cannot modify dispatch logic. MR merge events trigger retro pipelines via the same mechanism.
+1. **Native CI triggers for MR events.** MR creation, update, and reopen trigger review pipelines via GitLab's `merge_request_event` pipeline source. The dispatch template is loaded via `include: local:` from the enrolled project's protected default branch, ensuring untrusted MR branches cannot modify dispatch logic. MR merge events trigger retro pipelines via the same mechanism.
 
 2. **Cron-polled events for everything else.** A scheduled pipeline runs every N minutes (5 minutes on Premium/Ultimate, 60 minutes on Free tier), queries the GitLab API for new issues, comments, and label changes since the last poll, and dispatches the appropriate agent stages.
 
-The webhook bridge Cloud Function, webhook secrets, and trigger tokens are eliminated entirely.
+No external infrastructure is required for event dispatch. No webhook bridge, no webhook secrets, no trigger tokens.
 
 ```
 GitLab cron-polling architecture:
@@ -118,24 +119,57 @@ Event flow (MR events — native CI):
 Event flow (issues, comments, labels — cron):
   Pipeline schedule (every 5 min) → poll.yml → query GitLab API → dispatch agent stage
 
-Credential flow (unchanged from ADR 0043):
+Credential flow:
   Pipeline job → OIDC token → GCP STS → WIF → impersonate SA → Secret Manager → bot PAT
 ```
 
-### 1. Cron poller pipeline (`poll.yml`)
+### 1. Credential model
+
+**Primary credential — bot project access token via OIDC/WIF**: A Developer-role project access token with `api` scope, created during `fullsend admin install` and stored in GCP Secret Manager. Retrieved at runtime via GitLab OIDC → GCP WIF — no credentials are stored as CI/CD variables in the enrolled project.
+
+**OIDC token exchange flow**:
+1. Each stage pipeline declares `id_tokens: { FULLSEND_ID_TOKEN: { aud: "fullsend" } }`
+2. GitLab issues a signed JWT with claims: `project_id`, `project_path`, `namespace_id`, `ref_protected`, `pipeline_source`
+3. The job exchanges the OIDC token at GCP STS (`sts.googleapis.com`)
+4. GCP WIF validates the JWT signature against GitLab's JWKS public keys
+5. GCP WIF validates attribute conditions: enrolled project ID and `ref_protected == "true"`
+6. The job impersonates the fullsend GCP Service Account
+7. The job reads the bot project access token from Secret Manager
+8. The agent uses the bot PAT for all REST and GraphQL API operations
+
+**Why `api` scope**: No narrower project access token scope covers MR creation. GitLab's fine-grained CI/CD job token permissions support only `READ_MERGE_REQUESTS`, not write. When GitLab makes fine-grained project access tokens available, the bot PAT should be migrated to the narrowest possible scope.
+
+**Bot identity**: The project access token creates a dedicated bot user in GitLab. Agent comments, label changes, and MR operations are attributable to this bot — providing the same recognizable identity that GitHub Apps give fullsend via `fullsend-ai-review[bot]`.
+
+**GraphQL support**: Unlike `CI_JOB_TOKEN` (which [cannot authenticate GraphQL requests](https://docs.gitlab.com/ci/jobs/ci_job_token/)), the bot PAT authenticates both REST and GraphQL APIs. This is required for GitLab's Work Items API (issues, epics, custom fields, health status) which is GraphQL-only.
+
+**Compensating controls for broad scope**:
+- Set project access token expiry to 90 days (shorter than the 1-year maximum) to limit the window of exposure
+- Bot PAT stored in Secret Manager with IAM access controls — only the fullsend Service Account can read it
+- WIF attribute conditions restrict retrieval to pipelines from enrolled projects on protected branches
+- Token is never stored as a CI/CD variable — `CI_DEBUG_TRACE` cannot expose it
+
+**What is NOT needed**:
+- Token mint (no custom credential exchange service — standard GCP WIF handles it)
+- `CI_JOB_TOKEN` for API operations (insufficient for GraphQL and MR creation)
+- Per-project CI/CD variables for credentials (the project is secretless from GitLab's perspective)
+- Per-role tokens (all stages share the same bot PAT; per-role isolation is a future possibility via WIF attribute conditions)
+- Webhook secrets or trigger tokens (no webhook bridge)
+
+### 2. Cron poller pipeline (`poll.yml`)
 
 The polling pipeline runs on a GitLab pipeline schedule configured during `fullsend admin install`. It executes on the protected default branch with the same OIDC/WIF credential flow as all other fullsend stages.
 
 **Poll cycle:**
 
-1. Retrieve the bot PAT via OIDC/WIF (same credential flow as ADR 0043 Section 1).
+1. Retrieve the bot PAT via OIDC/WIF.
 2. Read the last-poll timestamp from a protected CI/CD variable (`FULLSEND_LAST_POLL_AT`).
 3. Query the GitLab API for changes since the last poll:
    - `GET /api/v4/projects/:id/issues?updated_after=<T>&state=all&per_page=100`
    - `GET /api/v4/projects/:id/merge_requests?updated_after=<T>&state=all&per_page=100`
    - `GET /api/v4/projects/:id/events?after=<date>&target_type=note&per_page=100`
 4. For each changed issue/MR, fetch notes if the `user_notes_count` increased or `updated_at` changed.
-5. Apply event routing rules (see Section 2) to determine which agent stages to dispatch.
+5. Apply event routing rules (see Section 3) to determine which agent stages to dispatch.
 6. For each dispatched stage, trigger a child pipeline via GitLab parent-child pipelines.
 7. Update `FULLSEND_LAST_POLL_AT` to `max(updated_at)` of all processed items, minus a 30-second overlap window for clock skew.
 8. Deduplication: track processed event IDs (issue IID + action, MR IID + action, note ID) in a job artifact or CI variable to prevent reprocessing across overlapping windows.
@@ -157,9 +191,7 @@ At 288 polls/day (5-minute interval), this is ~1,700–3,200 API calls/day — w
 
 **State storage:** `FULLSEND_LAST_POLL_AT` is stored as a protected CI/CD variable, updated via the GitLab API (`PUT /api/v4/projects/:id/variables/FULLSEND_LAST_POLL_AT`) at the end of each poll cycle. Protected variables are only accessible to pipelines on protected branches — tampering requires Maintainer access, the same privilege level as modifying the pipeline itself.
 
-### 2. Event routing
-
-The poller applies the same routing logic as ADR 0043 Section 4, adapted for API-discovered events rather than webhook payloads:
+### 3. Event routing
 
 | Detected Change | Signal | Stage |
 |---|---|---|
@@ -176,9 +208,9 @@ The poller applies the same routing logic as ADR 0043 Section 4, adapted for API
 | MR merged | (native CI path, not polled) | retro |
 | MR note with changes-requested marker | Same-project MR only | fix |
 
-**Label detection via state diffing:** The poller maintains a set of previously-seen labels per issue (stored in the dedup state). When a label appears that was not present in the previous poll, it is treated as a "label added" event. This is equivalent to the webhook bridge's detection of label changes via the `changes` object, but implemented client-side.
+**Label detection via state diffing:** The poller maintains a set of previously-seen labels per issue (stored in the dedup state). When a label appears that was not present in the previous poll, it is treated as a "label added" event. Webhook payloads include a `changes` object with previous/current label values, but since this architecture does not use webhooks, label change detection is implemented client-side via state comparison.
 
-### 3. Slash command latency mitigation
+### 4. Slash command latency mitigation
 
 Slash commands (`/fs-*` in comments) are the only latency-sensitive operation in the polling model. Triage, code generation, and review are inherently asynchronous — users do not wait for them. But a user who types `/fs-review` in a comment expects a response within seconds, not minutes.
 
@@ -206,9 +238,9 @@ TARGET_MR=42
 
 This is an escape hatch for power users, not the primary interface. The `fullsend admin install` command documents this in the project README.
 
-**GitLab Quick Action concern:** GitLab's built-in Quick Actions silently strip unrecognized `/`-prefixed lines from comments. If `/fs-triage` is stripped before the comment is saved, the poller will never see it. This must be tested empirically. If confirmed, the command syntax for GitLab should use an alternative prefix — `@fullsend triage` (mention-based) or `fs:triage` (colon-based) — that avoids the Quick Action parser. ADR 0042 (fs-prefix) permits forge-specific command syntax as long as the semantic mapping is consistent.
+**GitLab Quick Action concern:** GitLab's built-in Quick Actions silently strip unrecognized `/`-prefixed lines from comments. If `/fs-triage` is stripped before the comment is saved, the poller will never see it. This must be tested empirically. If confirmed, the command syntax for GitLab should use an alternative prefix — `@fullsend triage` (mention-based) or `fs:triage` (colon-based) — that avoids the Quick Action parser. [ADR 0042](0042-fs-prefix-for-slash-commands.md) permits forge-specific command syntax as long as the semantic mapping is consistent.
 
-### 4. Native MR event dispatch
+### 5. Native MR event dispatch
 
 MR events use GitLab's native `merge_request_event` pipeline source. The dispatch template is loaded from the protected default branch, ensuring MR authors cannot tamper with routing, credential retrieval, or fork protection.
 
@@ -262,9 +294,9 @@ dispatch:
       dotenv: dispatch.env
 ```
 
-**Fork MR protection:** The fix and code stages are skipped when `CI_MERGE_REQUEST_SOURCE_PROJECT_PATH != CI_MERGE_REQUEST_TARGET_PROJECT_PATH`. This prevents fork MRs from triggering stages that push commits to the target project. Carried forward from ADR 0043 Layer 7.
+**Fork MR protection:** The fix and code stages are skipped when `CI_MERGE_REQUEST_SOURCE_PROJECT_PATH != CI_MERGE_REQUEST_TARGET_PROJECT_PATH`. This prevents fork MRs from triggering stages that push commits to the target project.
 
-### 5. GitLab tier considerations
+### 6. GitLab tier considerations
 
 The cron-polling architecture works across all GitLab tiers but with meaningful differences:
 
@@ -307,7 +339,7 @@ The cron-polling architecture works across all GitLab tiers but with meaningful 
 - **Free tier:** Single pipeline schedule at 60-minute interval. README documents label-based triggers as primary. Warns about CI minute constraints and recommends self-hosted runners.
 - **Premium/Ultimate:** Two pipeline schedules — fast poll (5 minutes, slash command detection only) and slow poll (15 minutes, full event scan). README documents both slash commands and labels.
 
-### 6. Repo layout (updated from ADR 0043)
+### 7. Repo layout
 
 ```
 enrolled-project/
@@ -327,65 +359,74 @@ enrolled-project/
 └── AGENTS.md
 ```
 
-Changes from ADR 0043: `poll.yml` replaces the webhook bridge's role. `dispatch.yml` handles only native MR events, not webhook-bridged events.
+### 8. Config layering
 
-### 7. CLI changes (delta from ADR 0043)
+Same `customized/` convention as GitHub per-repo ([ADR 0033](0033-per-repo-installation-mode.md), [ADR 0035](0035-layered-content-resolution.md)):
 
-The `fullsend admin install` flow changes:
+```
+fullsend-ai/fullsend defaults  <  .fullsend/customized/  <  AGENTS.md
+(base, fetched at runtime)       (project overrides)       (instructions)
+```
 
-**Removed steps** (no longer needed):
-- Deploy bridge Cloud Function
-- Create pipeline trigger token
-- Register project with bridge (webhook secret + trigger token)
-- Create project webhook
+Config is always read from the protected default branch, not from MR source branches. The pipeline runs on `ref=main`, so the checkout reflects the default branch. This prevents MR authors from injecting modified agent instructions or policies.
 
-**Added steps:**
-- Create pipeline schedule(s) via GitLab API (`POST /api/v4/projects/:id/pipeline_schedules`)
-  - Fast poll schedule (5-minute interval, Premium/Ultimate only)
-  - Slow poll schedule (15-minute interval Premium/Ultimate, 60-minute Free)
-- Set `FULLSEND_LAST_POLL_AT` CI/CD variable (protected, initial value: current timestamp)
+### 9. CLI support
 
-**Unchanged steps:**
-- Create Project Access Token → store in Secret Manager
-- Configure WIF attribute condition
-- Commit CI/CD template files
-- Set protected CI/CD variables (WIF config)
-- Set up inference WIF
+```
+fullsend admin install group/project --forge gitlab
+```
 
-**Updated flags:**
-- Remove: `--bridge-project`, `--bridge-region`, `--skip-bridge-deploy`, `--bridge-url`
-- Add: `--poll-interval` (default: auto-detect from tier; override for self-managed)
-- Add: `--skip-schedule-create` (for environments where schedules are managed externally)
+The argument must be `group/project` format. Passing just a group name with `--forge gitlab` is an error: "GitLab installation supports per-repo mode only."
 
-**Uninstall flow changes:**
-- Remove: Delete project webhook, delete trigger token, remove bridge registration
-- Add: Delete pipeline schedule(s)
+**Flags**:
+- `--forge {github|gitlab}` — auto-detected from remote URL, overridable
+- `--gitlab-url` — GitLab instance URL (default: `https://gitlab.com`)
+- `--inference-project` — GCP project for Vertex AI inference (required)
+- `--inference-region` — GCP region for inference (default: `global`)
+- `--poll-interval` — cron schedule for polling (default: auto-detect from tier)
+- `--skip-schedule-create` — skip pipeline schedule creation (for externally managed schedules)
+- `--dry-run` — preview changes without making them
 
-### 8. Forge abstraction changes (delta from ADR 0043)
+**Install flow**:
+1. Parse `group/project`, resolve GitLab token (`GL_TOKEN` / `GITLAB_TOKEN` / `glab auth token`)
+2. Create GitLab forge client, validate project exists and user has Maintainer access
+3. Validate default branch is protected (`IsProtectedBranch`)
+4. Validate `CI_DEBUG_TRACE` is not enabled project-wide
+5. Set up WIF pool/provider for GitLab OIDC (if not already configured)
+6. Create Project Access Token (Developer role, `api` scope) → store in Secret Manager
+7. Configure WIF attribute condition: `assertion.project_id == "<id>" && assertion.ref_protected == "true"`
+8. Create pipeline schedule(s) — tier-adaptive (see Section 6)
+9. Commit CI/CD template files to the project via GitLab API
+10. Set protected CI/CD variables: `FULLSEND_WIF_PROVIDER`, `FULLSEND_SA`, `FULLSEND_BOT_TOKEN_SECRET`, `FULLSEND_GCP_PROJECT_ID`, `FULLSEND_FORGE=gitlab`, `FULLSEND_PER_REPO_INSTALL=true`
+11. Initialize poll watermark: `FULLSEND_LAST_POLL_AT` (protected, current timestamp)
+12. Set up inference WIF if `--inference-project` provided
 
-ADR 0043 proposed adding `CreateWebhook`, `DeleteWebhook`, and `TriggerPipeline` to `forge.Client`. With cron polling:
+**Uninstall flow** (`fullsend admin uninstall group/project --forge gitlab`):
+1. Delete pipeline schedule(s)
+2. Revoke bot project access token, delete Secret Manager secret
+3. Remove WIF attribute condition for this project
+4. Remove CI/CD template files from project
+5. Remove protected CI/CD variables
 
-**Still needed:**
-- `IsProtectedBranch(ctx, owner, repo, branch string) (bool, error)` — install-time validation
+### 10. Forge abstraction compliance
 
-**New methods:**
+[ADR 0005](0005-forge-abstraction-layer.md) promises: "Adding a new forge requires implementing `forge.Client` — no changes to layers, CLI, or app setup code."
+
+This ADR adds the following forge-neutral methods to `forge.Client`:
+- `IsProtectedBranch(ctx, owner, repo, branch string) (bool, error)`
 - `CreatePipelineSchedule(ctx, owner, repo, ref, description, cron string, variables map[string]string) (scheduleID string, err error)`
 - `DeletePipelineSchedule(ctx, owner, repo, scheduleID string) error`
-- `UpdateVariable(ctx, owner, repo, key, value string) error` — for poll watermark updates
+- `UpdateVariable(ctx, owner, repo, key, value string) error`
 
-**No longer needed:**
-- `CreateWebhook` / `DeleteWebhook` — eliminated with the bridge
-- `TriggerPipeline` — replaced by parent-child pipelines (GitLab-native, no forge method needed)
+GitHub-only methods (`ListOrgInstallations`, `GetAppClientID`) move to a `GitHubExtensions` extension interface. Callers type-assert to access them.
 
-GitHub returns `ErrNotSupported` for `CreatePipelineSchedule`/`DeletePipelineSchedule` (GitHub Actions uses `workflow_dispatch` and `schedule` in YAML, not API-managed schedules).
+A new `ErrNotSupported` sentinel allows forge implementations to reject inapplicable operations (e.g., GitLab returns `ErrNotSupported` for `DispatchWorkflow`; GitHub returns it for `CreatePipelineSchedule`).
 
 ## Security Model
 
-The cron-polling model inherits Security Layers 2, 4, 5, and 7 from ADR 0043 unchanged. Layers 1, 3, and 6 are replaced or eliminated.
+### Layer 1: Pipeline runs on protected default branch only
 
-### Layer 1: Pipeline runs on protected default branch only (replaces bridge `ref=main`)
-
-ADR 0043's bridge hardcoded `ref=main` to ensure pipelines run trusted code. In the cron model, the pipeline schedule is configured to run on the protected default branch at install time. The `workflow:rules` enforce this:
+The pipeline schedule is configured to run on the protected default branch at install time. The `workflow:rules` enforce this:
 
 ```yaml
 - if: $CI_PIPELINE_SOURCE == "schedule" && $CI_COMMIT_REF_PROTECTED == "true"
@@ -395,39 +436,52 @@ A scheduled pipeline cannot be redirected to a non-protected branch without Main
 
 **Threat**: An insider with Maintainer access modifies the pipeline schedule to target a malicious branch. **Mitigation**: WIF attribute conditions reject OIDC token exchange for pipelines on non-protected branches (`assertion.ref_protected == "true"`). The bot PAT cannot be retrieved.
 
-### Layer 2: Protected CI/CD variables (unchanged from ADR 0043)
+### Layer 2: Protected CI/CD variables
 
-All CI/CD variables that gate credential retrieval are marked protected. Unchanged.
+All CI/CD variables that gate credential retrieval MUST be marked as "protected." GitLab restricts protected variables to pipelines running on protected branches only. No credentials are stored directly as CI/CD variables — the bot PAT lives in Secret Manager — but the WIF configuration variables enable credential retrieval, so protecting them is defense-in-depth.
 
-### Layer 3: No webhook secrets needed (eliminates ADR 0043 Layer 3)
+**Required protected variables**:
+- `FULLSEND_WIF_PROVIDER` — WIF provider resource name
+- `FULLSEND_SA` — GCP Service Account email
+- `FULLSEND_BOT_TOKEN_SECRET` — Secret Manager secret name for the bot PAT
+- `FULLSEND_GCP_PROJECT_ID` — GCP project for Secret Manager and inference
+- `FULLSEND_LAST_POLL_AT` — poll watermark timestamp
 
-The webhook bridge required per-project webhook secrets for `X-Gitlab-Token` validation. Cron polling eliminates webhook secrets entirely — there is no inbound endpoint to authenticate. The credential surface is reduced from three secret types (bot PAT, webhook secret, trigger token) to one (bot PAT).
+### Layer 3: No inbound endpoint, no webhook secrets
 
-### Layer 4: OIDC/WIF attribute conditions (unchanged from ADR 0043)
+Cron polling is entirely outbound — there is no public endpoint to authenticate, no webhook secrets to manage, and no trigger tokens. The credential surface is a single bot PAT stored in Secret Manager, retrieved via OIDC/WIF. This eliminates the attack vectors associated with shared-secret authentication: leakage, brute-forcing, timing side-channels, and replay of intercepted webhook payloads.
 
-WIF conditions restrict OIDC exchange to enrolled projects on protected branches. Unchanged.
+### Layer 4: OIDC/WIF attribute conditions
 
-### Layer 5: `CI_DEBUG_TRACE` guard (unchanged from ADR 0043)
+GCP WIF attribute conditions restrict which GitLab pipelines can exchange OIDC tokens for GCP credentials:
+- `assertion.project_id == "<enrolled_project_id>"` — only the specific enrolled project
+- `assertion.ref_protected == "true"` — only pipelines running on protected branches
 
-Runtime check aborts if debug tracing is enabled. Unchanged.
+This provides cryptographic enforcement that the bot PAT can only be retrieved by the correct project on a protected branch.
 
-### Layer 6: Event data sanitization (replaces ADR 0043 Layer 6)
+### Layer 5: `CI_DEBUG_TRACE` guard (best-effort)
 
-ADR 0043 used base64 encoding to prevent YAML injection when passing webhook payloads as pipeline variables. In the cron model, the poller reads event data directly from the GitLab API and passes it to child pipelines via parent-child pipeline variables. The same base64 encoding is applied:
+GitLab's `CI_DEBUG_TRACE` variable, when enabled, prints all CI/CD variables to job logs. Two defenses:
+1. **Install-time**: `fullsend admin install` validates that `CI_DEBUG_TRACE` is not enabled.
+2. **Runtime**: Every stage pipeline includes an early guard that aborts if `CI_DEBUG_TRACE` is detected.
+
+The bot PAT is not stored as a CI/CD variable, so `CI_DEBUG_TRACE` cannot directly expose it. However, the OIDC token may be logged, and an attacker with the WIF config + OIDC token could replay the exchange within its ~5 minute TTL.
+
+### Layer 6: Event data sanitization
+
+Attacker-controlled content (issue titles, MR descriptions, comment bodies) could contain YAML metacharacters or shell injection payloads. All event data is base64-encoded before passing to child pipelines:
 
 ```bash
 EVENT_PAYLOAD=$(echo "${event_json}" | base64 -w0)
 ```
 
-The risk is the same — attacker-controlled content (issue titles, MR descriptions, comment bodies) could contain YAML metacharacters or shell injection payloads. The mitigation is the same — base64 encode all event data before passing to child pipelines.
+### Layer 7: Fork MR protection
 
-### Layer 7: Fork MR protection (unchanged from ADR 0043)
+The fix stage is skipped when the MR's `source_project_id != target_project_id`. This prevents fork MRs from triggering fix pipelines that would push commits to the target project.
 
-Fix stage skipped for fork MRs. Unchanged.
+### Security comparison: polling vs webhooks
 
-### Security comparison with webhook bridge
-
-| Dimension | Webhook Bridge (ADR 0043) | Cron Polling (this ADR) |
+| Dimension | Webhook Bridge | Cron Polling (this ADR) |
 |---|---|---|
 | Inbound attack surface | Public HTTPS endpoint | None |
 | Event authenticity | Shared secret (`X-Gitlab-Token`) | Direct API read (authoritative) |
@@ -439,53 +493,78 @@ Fix stage skipped for fork MRs. Unchanged.
 | Prompt injection risk | Same (attacker-controlled event content) | Same |
 | Infrastructure to secure | Cloud Function + IAM + network policies | Pipeline schedule (native CI/CD) |
 
-**Overall assessment:** Cron polling has a materially stronger security posture. Eliminating the public HTTP endpoint, the webhook secret management, and the bidirectional network requirement each independently reduce risk. The only trade-off is latency, which is acceptable for the asynchronous operations that cron handles.
-
 ## Comparison with GitHub
 
-| Concern | GitHub (ADR 0033) | GitLab (this ADR) |
+| Concern | GitHub ([ADR 0033](0033-per-repo-installation-mode.md)) | GitLab (this ADR) |
 |---|---|---|
+| Installation modes | Per-org and per-repo | Per-repo only |
+| Primary credential | GitHub App installation token via mint OIDC | Bot project access token via OIDC/WIF |
 | MR/PR event dispatch | `pull_request_target` (native) | `merge_request_event` + `include: ref: main` (native) |
 | Issue/comment dispatch | `issues` / `issue_comment` events (native) | Cron polling (scheduled pipeline) |
 | Slash commands | Comment events (sub-second) | Cron polling (up to 5 min) or labels |
 | External infrastructure | Mint Cloud Function | None for event dispatch; WIF + Secret Manager for credentials |
 | Event detection latency | Sub-second (all events) | Sub-second (MR events), 5 min (issues/comments on Premium) |
 | CI minute cost for dispatch | None (event-triggered) | ~8,640 min/month per project at 5-min interval |
+| Token mint | Required (custom Cloud Function) | Not needed (standard GCP WIF) |
+| Credential rotation | App keys never expire | PAT expires (max 1 year), centralized in Secret Manager |
+
+**Where GitLab is simpler**:
+- No App creation dance (no browser-based manifest flow)
+- No custom mint service (standard GCP WIF replaces the mint Cloud Function)
+- No PEM handling (no private key generation, no JWT signing)
+- No installation token exchange chain
+- Secretless from the project's perspective (no credentials stored as CI/CD variables)
+- No external infrastructure for event dispatch (no webhook bridge)
+
+**Where GitLab is harder**:
+- No native CI triggers for issue/comment events (requires polling)
+- Review semantics (no native review object — must synthesize from notes and approvals)
+- Project access token rotation (GitHub App keys don't expire)
+- `CI_DEBUG_TRACE` exposure (though reduced risk since credentials are not CI/CD variables)
+- Subgroup paths (deeply nested namespaces like `org/sub1/sub2/project`)
+- CI minute consumption for polling on shared runners
 
 ## Consequences
 
 ### Positive
 
-- **No external infrastructure for event dispatch.** The webhook bridge Cloud Function is eliminated. Deployment, monitoring, scaling, and security of an external service are no longer required.
+- **No external infrastructure for event dispatch.** No Cloud Function, no webhook bridge, no additional services to deploy, monitor, or maintain.
 - **Zero inbound attack surface.** No public HTTP endpoint. No webhook secrets to manage, rotate, or protect against leakage. No trigger tokens.
 - **Simpler self-hosted GitLab deployment.** Outbound-only network requirements. No VPN peering, firewall rules, or on-premise container deployment needed for event detection.
 - **Stronger event authenticity.** Events read directly from the GitLab API, not from potentially spoofed webhook payloads.
-- **No event loss from delivery failures.** Polling reads from the source of truth. GitLab's webhook auto-disable mechanism (after 4 consecutive failures) cannot cause silent event loss.
-- **Fewer credentials per project.** One secret type (bot PAT) instead of three (bot PAT + webhook secret + trigger token).
-- **MR events still sub-second.** Native `merge_request_event` pipeline source provides the same latency as webhook-bridged MR events, with less complexity.
+- **No event loss from delivery failures.** Polling reads from the source of truth.
+- **Single credential per project.** One secret type (bot PAT) stored in Secret Manager, retrieved via OIDC/WIF.
+- **MR events still sub-second.** Native `merge_request_event` pipeline source provides immediate review triggers.
 - **Tier-adaptive.** Architecture works on all GitLab tiers; `fullsend admin install` adapts poll frequency and interaction model to the detected tier.
+- **No token mint changes.** GitLab support requires zero changes to existing mint infrastructure.
+- **Reuses inference infrastructure.** WIF pool/provider and Secret Manager are the same GCP services already provisioned for Vertex AI inference.
 
 ### Negative
 
-- **Latency for issue/comment events.** Up to 5 minutes on Premium/Ultimate, 60 minutes on Free tier. This is the fundamental trade-off — acceptable for asynchronous agent operations, poor for interactive use on Free tier.
-- **CI minute consumption.** Polling pipelines run continuously, consuming CI minutes even when idle. On gitlab.com shared runners: ~8,640 minutes/month at 5-minute intervals (fits within Premium's 10,000; exceeds Free's 400). Self-hosted runners are not billed.
-- **State management complexity.** The poller must track last-seen timestamps, dedup processed events, and handle edge cases (clock skew, deleted events, API pagination). The webhook bridge avoided this by processing each event exactly once on delivery.
+- **Latency for issue/comment events.** Up to 5 minutes on Premium/Ultimate, 60 minutes on Free tier. Acceptable for asynchronous agent operations, poor for interactive use on Free tier.
+- **CI minute consumption.** Polling pipelines run continuously, consuming CI minutes even when idle. On gitlab.com shared runners: ~8,640 minutes/month at 5-minute intervals. Self-hosted runners are not billed.
+- **State management complexity.** The poller must track last-seen timestamps, dedup processed events, and handle edge cases (clock skew, deleted events, API pagination).
 - **Slash command latency.** Up to 5 minutes vs sub-second with webhooks. Mitigated by labels and multi-frequency polling, but inherently slower than push-based dispatch.
 - **Quick Action stripping risk.** GitLab may silently strip `/fs-*` commands from comments. Requires empirical testing and potentially an alternative command syntax for GitLab.
+- **Per-repo only.** No centralized config, policies, or credential management across projects. Organizations wanting uniform agent behavior must manage CI/CD Components and group-level variables independently.
+- **`api` scope is broad.** The bot project access token has full project API access. A narrower scope is not available in GitLab today.
+- **GCP dependency for forge credentials.** Secret Manager + WIF are required for credential retrieval, not just inference.
 
 ### Risks
 
 Ordered by the project's threat priority (external injection > insider > drift > supply chain):
 
-1. **External injection — prompt injection via polled events.** Same risk as ADR 0043 — attacker-controlled content (issue titles, MR descriptions, comments) reaches the agent. **Mitigation**: Base64 encoding of event payloads passed to child pipelines (Layer 6). The transport mechanism (polling vs webhook) does not change the content risk.
+1. **External injection — prompt injection via polled events.** Attacker-controlled content (issue titles, MR descriptions, comments) reaches the agent. **Mitigation**: Base64 encoding of event payloads passed to child pipelines (Layer 6). The transport mechanism does not change the content risk.
 
-2. **Insider — poll watermark tampering.** A Maintainer could modify `FULLSEND_LAST_POLL_AT` to skip events (set far future) or replay events (set far past). **Mitigation**: The variable is protected (Layer 2). Tampering requires the same Maintainer access that could modify the pipeline itself — the threat is contained within the existing insider model. Event deduplication prevents harmful reprocessing.
+2. **Insider — poll watermark tampering.** A Maintainer could modify `FULLSEND_LAST_POLL_AT` to skip events (set far future) or replay events (set far past). **Mitigation**: The variable is protected (Layer 2). Tampering requires the same Maintainer access that could modify the pipeline itself. Event deduplication prevents harmful reprocessing.
 
 3. **Insider — schedule modification.** A Maintainer could modify the pipeline schedule to target a non-protected branch or increase/decrease frequency. **Mitigation**: WIF attribute conditions (Layer 4) reject credential retrieval on non-protected branches. Schedule changes are auditable in GitLab's audit log.
 
 4. **Drift — missed events from API quirks.** The Notes API lacks a `created_after` filter; the Events API `after` parameter is date-only (not datetime). Client-side filtering may miss events at date boundaries. **Mitigation**: 30-second overlap window on the watermark and event ID-based deduplication. Slow poll (15-minute) serves as reconciliation for the fast poll (5-minute).
 
-5. **Drift — CI minute exhaustion.** On gitlab.com shared runners, the polling pipeline may exhaust the project's CI minute quota, preventing legitimate builds. **Mitigation**: `fullsend admin install` warns about CI minute consumption. Polling jobs use the smallest available runner (1 vCPU) and exit quickly when no events are found. Self-hosted runners are the recommended deployment model.
+5. **Drift — CI minute exhaustion.** On gitlab.com shared runners, the polling pipeline may exhaust the project's CI minute quota. **Mitigation**: `fullsend admin install` warns about CI minute consumption. Polling jobs use the smallest available runner and exit quickly when no events are found. Self-hosted runners are the recommended deployment model.
+
+6. **Drift — token expiration.** If the bot PAT expires without renewal, all agent stages fail to authenticate. **Mitigation**: Expiration monitoring and `fullsend admin rotate-token` command (updates Secret Manager secret centrally).
 
 ## Open Questions
 
@@ -511,7 +590,11 @@ Self-managed GitLab administrators may have different minimum schedule intervals
 
 ### Jira integration path
 
-As raised in team discussion: many GitLab users track work in Jira, not GitLab issues. The triage and code agents may primarily need to poll Jira for issue events, not GitLab. The cron-polling architecture is well-suited to this — the poller can be extended to query external systems (Jira API) in addition to GitLab. This is a future consideration that does not affect the current ADR.
+Many GitLab users track work in Jira, not GitLab issues. The triage and code agents may primarily need to poll Jira for issue events, not GitLab. The cron-polling architecture is well-suited to this — the poller can be extended to query external systems (Jira API) in addition to GitLab. This is a future consideration that does not affect the current ADR.
+
+### Per-role credential isolation via WIF
+
+The current design uses a single bot PAT for all stages. WIF attribute conditions could be extended to select different Secret Manager secrets per stage — for example, a read-only PAT for triage/review and a write PAT for code/fix. This would require per-stage `id_tokens` with different audiences and corresponding WIF attribute conditions. This is a future optimization that adds complexity but provides per-role isolation.
 
 ## Implementation Details
 
@@ -543,14 +626,19 @@ Phases 1 and 2 depend on Phase 0 (forge interface changes). Phase 3 (CI/CD templ
 
 ## References
 
-- [GitLab per-repo support via OIDC/WIF and webhook bridge (PR #2042)](https://github.com/fullsend-ai/fullsend/pull/2042) — partially superseded (webhook bridge sections)
+- [ADR 0005: Forge abstraction layer](0005-forge-abstraction-layer.md) — abstraction boundary preserved
+- [ADR 0028: GitLab Support Architecture](0028-gitlab-support.md) — original GitLab support discussion
 - [ADR 0033: Per-repo installation mode](0033-per-repo-installation-mode.md) — GitHub per-repo (adapted for GitLab)
+- [ADR 0035: Layered content resolution](0035-layered-content-resolution.md) — same `customized/` convention
 - [ADR 0042: fs-prefix for slash commands](0042-fs-prefix-for-slash-commands.md) — command syntax conventions
 - [GitLab Pipeline Schedules](https://docs.gitlab.com/ci/pipelines/schedules/) — scheduled pipeline configuration and tier limits
+- [GitLab OIDC `id_tokens`](https://docs.gitlab.com/ci/secrets/id_token_authentication/) — native OIDC token issuance
+- [GCP Workload Identity Federation for GitLab](https://docs.gitlab.com/ci/cloud_services/google_cloud/) — OIDC → GCP credential exchange
+- [GitLab CI/CD job tokens](https://docs.gitlab.com/ee/ci/jobs/ci_job_token.html) — `CI_JOB_TOKEN` limitations
+- [GitLab Project Access Tokens](https://docs.gitlab.com/user/project/settings/project_access_tokens/) — scopes, tier availability
 - [GitLab Issues API](https://docs.gitlab.com/api/issues/) — `updated_after` parameter for polling
 - [GitLab Merge Requests API](https://docs.gitlab.com/api/merge_requests/) — `updated_after` parameter for polling
 - [GitLab Events API](https://docs.gitlab.com/api/events/) — project activity feed for note discovery
-- [GitLab Project Access Tokens](https://docs.gitlab.com/user/project/settings/project_access_tokens/) — tier availability
 - [GitLab CI/CD Compute Minutes](https://docs.gitlab.com/ci/pipelines/compute_minutes/) — quota and billing
 - [GitLab Rate Limits](https://docs.gitlab.com/security/rate_limits/) — API rate limits by tier
 - [GitLab `include: project:`](https://docs.gitlab.com/ci/yaml/includes/) — trusted template inclusion from protected branches
