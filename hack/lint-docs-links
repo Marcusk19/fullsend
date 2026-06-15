@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# lint-docs-links - Reject relative links in docs/ that resolve outside docs/
+# lint-docs-links - Reject relative links in docs/ that resolve outside the repo root
 #
 # Accepts a list of markdown files as arguments (passed by pre-commit).
 # Absolute URLs (http/https/mailto) and anchor-only links (#section) are ignored.
@@ -14,7 +14,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 error() { echo "ERROR: $1" >&2; }
 success() { echo "OK: $1"; }
 
-docs_dir="$REPO_ROOT/docs"
 escaped_links=()
 
 for mdfile in "$@"; do
@@ -27,27 +26,26 @@ for mdfile in "$@"; do
         path="${target%%#*}"
         [[ -z "$path" ]] && continue
         resolved="$(cd "$file_dir" && realpath -m "$path")"
-        if [[ "$resolved" != "$docs_dir"* ]]; then
+        if [[ "$resolved" != "$REPO_ROOT"* ]]; then
             escaped_links+=("$rel_file: $target")
         fi
     done < <(grep -oP '(?<=\])\(\K[^)]+' "$mdfile" || true)
 done
 
 if [[ ${#escaped_links[@]} -eq 0 ]]; then
-    success "No docs/ links escape docs/"
+    success "No docs/ links escape the repository root"
     exit 0
 fi
 
 echo "========================"
-echo "docs/ links that escape docs/:"
+echo "docs/ links that escape the repository root:"
 echo "========================"
 for link in "${escaped_links[@]}"; do
     error "$link"
 done
 echo "========================"
-error "${#escaped_links[@]} escaping link(s) found — docs/ links must stay within docs/"
+error "${#escaped_links[@]} escaping link(s) found — docs/ links must stay within the repository"
 echo ""
-echo "  docs/ is served as a standalone site; links outside it are broken for readers."
-echo "  To link a file elsewhere in the repository, use an absolute GitHub URL:"
-echo "  https://github.com/fullsend-ai/fullsend/blob/main/<path-from-repo-root>"
+echo "  Relative links in docs/ must resolve to a path within the repository."
+echo "  To link an external resource, use an absolute URL."
 exit 1
