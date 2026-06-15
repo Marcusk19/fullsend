@@ -46,6 +46,30 @@ The e2e tests require GitHub credentials. There are three ways to provide them:
 
 If only `E2E_GITHUB_USERNAME` and a password source are available, `make e2e-test` will automatically generate a session file before running tests. See `make help` for all available targets.
 
+## Shell scripting
+
+### `gh api --paginate` and jq
+
+`gh api --paginate` applies the `--jq` expression **independently to each page** of results, not to the combined output. This is a documented `gh` CLI behavior and a common source of bugs.
+
+**Do not** use aggregating jq filters directly in `--jq` with `--paginate`:
+
+```bash
+# WRONG — `length` runs per-page; multi-line output breaks integer comparisons
+count=$(gh api --paginate /repos/{owner}/{repo}/issues/comments --jq '.[].id | length')
+```
+
+**Do** collect all pages first, then pipe to a separate `jq -s` (slurp) call:
+
+```bash
+# Correct — slurp (-s) combines all pages into one array before aggregating
+count=$(gh api --paginate /repos/{owner}/{repo}/issues/comments | jq -s 'length')
+```
+
+This applies to any aggregating filter: `length`, `sort_by`, `group_by`, `add`, `min_by`, `max_by`, etc. If the filter only selects or transforms individual items (e.g., `.[] | .id`), per-page application is fine — but pipe the result through a final `jq -s` step before any cross-page aggregation.
+
+**When reviewing shell scripts:** Flag `--paginate --jq '... | length'` (or any other aggregating filter in `--jq`) as a medium-severity finding. The fix is always to move the aggregation to a separate `| jq -s '...'` pipe.
+
 ## Forge abstraction
 
 All git forge operations (GitHub API calls, PR comments, issue creation, workflow dispatch, etc.) **must** go through the `forge.Client` interface defined in `internal/forge/forge.go`. This is a fundamental architectural rule — the codebase supports multiple forges (GitHub, GitLab, Forgejo) and direct coupling to any single forge breaks the abstraction.
