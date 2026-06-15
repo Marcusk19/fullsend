@@ -27,19 +27,12 @@ EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${EVAL_DIR}/.." && pwd)"
 export REPO_ROOT
 export PATH="${EVAL_DIR}/scripts:${PATH}"
-EVAL_YAML_SRC="${EVAL_DIR}/${AGENT}/eval.yaml"
+EVAL_YAML="${EVAL_DIR}/${AGENT}/eval.yaml"
 CASES_DIR="${EVAL_DIR}/${AGENT}/cases"
-
-# The harness has inconsistent path resolution for dataset.path between
-# workspace.py (config-dir-relative) and execute.py (cwd-relative). Work
-# around this by rewriting dataset.path to an absolute path at runtime.
-EVAL_YAML="$(mktemp "${EVAL_DIR}/${AGENT}/eval-runtime-XXXXXX.yaml")"
-trap 'rm -f "$EVAL_YAML"' EXIT
-yq ".dataset.path = \"${CASES_DIR}\"" "$EVAL_YAML_SRC" > "$EVAL_YAML"
 HARNESS_DIR="${AGENT_EVAL_HARNESS_DIR:-${EVAL_DIR}/.agent-eval-harness}"
 
-if [[ ! -f "$EVAL_YAML_SRC" ]]; then
-  echo "ERROR: eval config not found: $EVAL_YAML_SRC" >&2
+if [[ ! -f "$EVAL_YAML" ]]; then
+  echo "ERROR: eval config not found: $EVAL_YAML" >&2
   exit 1
 fi
 
@@ -88,9 +81,10 @@ echo ""
 # Phase 1: Create workspaces
 # ---------------------------------------------------------------------------
 echo "=== Creating workspaces ==="
-python3 "$WORKSPACE_PY" \
+# Run from the agent's eval directory so relative dataset.path resolves.
+(cd "$(dirname "$EVAL_YAML")" && python3 "$WORKSPACE_PY" \
   --config "$EVAL_YAML" \
-  --run-id "$RUN_ID"
+  --run-id "$RUN_ID")
 
 # ---------------------------------------------------------------------------
 # Phase 2: Execute — harness drives case iteration with hooks
