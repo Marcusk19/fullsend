@@ -253,7 +253,8 @@ jobs:
           # agent execution, allowing at most +1 overshoot. The concurrency
           # group's cancel-in-progress mostly prevents this.
           FIX_COMMITS="$(gh api "repos/${SOURCE_REPO}/pulls/${PR_NUM}/commits" \
-            --paginate --jq '[.[] | select(.commit.author.name == "fullsend-fix")] | length' 2>/dev/null)" \
+            --paginate 2>/dev/null \
+            | jq -s 'add | [.[] | select(.commit.author.name == "fullsend-fix")] | length')" \
             || { echo "::warning::Could not count prior fix commits — defaulting to cap"; FIX_COMMITS="${ITERATION_CAP:-5}"; }
           ITERATION=$(( FIX_COMMITS + 1 ))
           echo "Fix iteration: ${ITERATION} (${FIX_COMMITS} previous fix commits)" >&2
