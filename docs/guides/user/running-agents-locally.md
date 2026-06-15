@@ -46,9 +46,9 @@ fullsend --version
 
 ## Install OpenShell
 
-[OpenShell](https://github.com/NVIDIA/OpenShell) provides the sandbox runtime. There are multiple ways
-to install it, here we use one similar to how we download it on Fullsend. Use the same version
-printed on your Fullsend workflow for better reproducibility.
+[OpenShell](https://github.com/NVIDIA/OpenShell) provides the sandbox runtime. The pinned version
+lives in [`.github/scripts/openshell-version.sh`](../../../.github/scripts/openshell-version.sh). You
+can run that script directly, or install manually with the same version for reproducibility:
 
 ```bash
 export OPENSHELL_VERSION=0.0.54
