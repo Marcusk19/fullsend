@@ -57,7 +57,7 @@ CASE_ID_SAFE=$(basename "$CASE_SOURCE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's
 repo_name="eval-${CASE_ID_SAFE}-${uuid}"
 EPHEMERAL_REPO="${EVAL_ORG}/${repo_name}"
 
-gh repo create "$EPHEMERAL_REPO" --public --description "Ephemeral eval repo (auto-deleted)"
+gh repo create "$EPHEMERAL_REPO" --private --description "Ephemeral eval repo (auto-deleted)"
 echo "Created repo: $EPHEMERAL_REPO"
 
 cleanup_on_failure() {
@@ -127,8 +127,10 @@ case "${FORGE}:${FIXTURE_TYPE}" in
       echo "$FIXTURE_FILES" | yq -r ".[$i].content" > "$TARGET_DIR/$path"
     done
     git -C "$TARGET_DIR" add -A
-    git -C "$TARGET_DIR" commit -m "eval: fixture changes"
-    git -C "$TARGET_DIR" push origin "$PR_BRANCH"
+    if ! git -C "$TARGET_DIR" diff --cached --quiet; then
+      git -C "$TARGET_DIR" commit -m "eval: fixture changes"
+      git -C "$TARGET_DIR" push origin "$PR_BRANCH"
+    fi
     FIXTURE_URL=$(gh pr create \
       --repo "$EPHEMERAL_REPO" \
       --base "$FIXTURE_BASE" \

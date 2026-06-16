@@ -113,8 +113,6 @@ jobs:
         run: |
           for dir in eval/runs/ /tmp/agent-eval/; do
             find "$dir" -name '.eval-env' -delete 2>/dev/null || true
-            find "$dir" -name 'fixture-state.json' -delete 2>/dev/null || true
-            find "$dir" -name '*.jsonl' -delete 2>/dev/null || true
           done
 
       - name: Upload eval results
@@ -125,6 +123,4 @@ jobs:
           path: |
             eval/runs/
             !eval/runs/**/.eval-env
-            !eval/runs/**/fixture-state.json
-            !eval/runs/**/*.jsonl
           retention-days: 30
