@@ -62,16 +62,6 @@ jobs:
       - name: Add bin to PATH
         run: echo "${{ github.workspace }}/bin" >> "$GITHUB_PATH"
 
-      - name: Install OpenShell CLI
-        run: .github/scripts/install-openshell.sh
-
-      - name: Configure OpenShell gateway
-        run: |
-          mkdir -p $HOME/.config/openshell/
-          cat > $HOME/.config/openshell/gateway.env << EOF
-          OPENSHELL_BIND_ADDRESS=0.0.0.0
-          EOF
-
       - name: Install Podman
         run: |
           sudo apt-get update
@@ -83,6 +73,16 @@ jobs:
           grep -q "^${whoami_user}:" /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "${whoami_user}"
           podman system migrate
           systemctl --user start podman.socket
+
+      - name: Install OpenShell CLI
+        run: .github/scripts/install-openshell.sh
+
+      - name: Configure OpenShell gateway
+        run: |
+          mkdir -p $HOME/.config/openshell/
+          cat > $HOME/.config/openshell/gateway.env << EOF
+          OPENSHELL_BIND_ADDRESS=0.0.0.0
+          EOF
 
       - name: Install validation dependencies
         run: pip install --quiet "jsonschema>=4.18.0"
