@@ -95,7 +95,7 @@ agent skill:
 
 ```
 eval/
-  fullsend-runner.sh          # CLI runner: fixture setup -> fullsend run -> capture state
+  scripts/run-fullsend.sh     # CLI runner: fixture setup -> fullsend run -> capture state
   run-functional.sh           # Orchestrator: iterate cases, score
   <skill>/
     eval.yaml                 # Test config: judges, thresholds, models

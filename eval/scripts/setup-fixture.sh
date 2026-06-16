@@ -60,6 +60,14 @@ EPHEMERAL_REPO="${EVAL_ORG}/${repo_name}"
 gh repo create "$EPHEMERAL_REPO" --public --description "Ephemeral eval repo (auto-deleted)"
 echo "Created repo: $EPHEMERAL_REPO"
 
+cleanup_on_failure() {
+  [[ -n "${TARGET_DIR:-}" && -d "${TARGET_DIR}" ]] && rm -rf "$TARGET_DIR"
+  if [[ -n "${EPHEMERAL_REPO:-}" ]] && [[ ! -f "${CASE_WORKSPACE}/.hook-outputs.yaml" ]]; then
+    gh repo delete "$EPHEMERAL_REPO" --yes 2>/dev/null || true
+  fi
+}
+trap cleanup_on_failure EXIT
+
 TARGET_DIR=$(mktemp -d)
 GH_CRED_HELPER='!f(){ echo "password=${GH_TOKEN}"; };f'
 git -c "credential.helper=${GH_CRED_HELPER}" \
@@ -111,6 +119,10 @@ case "${FORGE}:${FIXTURE_TYPE}" in
     file_count=$(echo "$FIXTURE_FILES" | yq -r 'length')
     for i in $(seq 0 $((file_count - 1))); do
       path=$(echo "$FIXTURE_FILES" | yq -r ".[$i].path")
+      if [[ "$path" == /* ]] || [[ "$path" == *..* ]]; then
+        echo "ERROR: fixture.files[].path contains unsafe path: $path" >&2
+        exit 1
+      fi
       mkdir -p "$TARGET_DIR/$(dirname "$path")"
       echo "$FIXTURE_FILES" | yq -r ".[$i].content" > "$TARGET_DIR/$path"
     done

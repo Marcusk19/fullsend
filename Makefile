@@ -160,11 +160,12 @@ FULLSEND_DIR ?= $(CURDIR)/internal/scaffold/fullsend-repo
 EVAL_AGENTS  ?= triage
 
 lint-eval-cases:
-	@for agent in $(EVAL_AGENTS); do \
+	@command -v yq >/dev/null 2>&1 || { echo "ERROR: yq required — install from https://github.com/mikefarah/yq"; exit 1; }
+	@set -e; for agent in $(EVAL_AGENTS); do \
 		./eval/lint-cases.sh "$$agent"; \
 	done
 
 functional-tests: lint-eval-cases
-	@for agent in $(EVAL_AGENTS); do \
+	@set -e; for agent in $(EVAL_AGENTS); do \
 		FULLSEND_DIR="$(FULLSEND_DIR)" ./eval/run-functional.sh "$$agent"; \
 	done

@@ -25,6 +25,7 @@ hooks:
   after_each:
     - command: "capture-fixture.sh"
       timeout: 30
+      on_failure: continue
       description: "Capture fixture state for judges"
     - command: "teardown-fixture.sh"
       timeout: 30
@@ -141,6 +142,19 @@ judges:
           return False, f"Forbidden labels present: {present} (actual: {actual})"
       return True, f"No forbidden labels found (checked: {forbidden})"
 
+  - name: state_check
+    description: Fixture state must match annotations.yaml
+    check: |
+      import json
+      state = json.loads(outputs["files"]["output/fixture-state.json"])
+      expected = outputs.get("annotations", {}).get("state")
+      if expected is None:
+          return True, "No expected state specified"
+      actual = state.get("state", "").lower()
+      if actual != expected.lower():
+          return False, f"State mismatch: expected {expected}, got {actual}"
+      return True, f"State OK: {actual}"
+
   - name: max_turns
     description: Agent must complete within the declared turn budget
     check: |
@@ -189,6 +203,8 @@ thresholds:
     min_pass_rate: 0.9
   forbidden_labels:
     min_pass_rate: 0.9
+  state_check:
+    min_pass_rate: 1.0
   max_turns:
     min_pass_rate: 1.0
   max_cost:
