@@ -124,6 +124,10 @@ This gives the triage agent the subtlety it needs to distinguish between
 controller-runtime code, without adding label documentation to `AGENTS.md`
 where every agent would pay the context cost.
 
+### Variables
+
+None.
+
 ## Source
 
 [`internal/scaffold/fullsend-repo/harness/triage.yaml`](../../internal/scaffold/fullsend-repo/harness/triage.yaml)
