@@ -265,11 +265,7 @@ runs:
 
     - name: Install OpenShell CLI
       shell: bash
-      run: |
-        source "$GITHUB_ACTION_PATH/.github/scripts/openshell-version.sh"
-        curl -LsSf "https://raw.githubusercontent.com/NVIDIA/OpenShell/${OPENSHELL_SHA}/install.sh" \
-          | OPENSHELL_VERSION="v${OPENSHELL_VERSION}" sh
-        openshell --version
+      run: "$GITHUB_ACTION_PATH/.github/scripts/install-openshell.sh"
 
     - name: Configure OpenShell gateway
       shell: bash

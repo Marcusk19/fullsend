@@ -63,12 +63,7 @@ jobs:
         run: echo "${{ github.workspace }}/bin" >> "$GITHUB_PATH"
 
       - name: Install OpenShell CLI
-        run: |
-          source .github/scripts/openshell-version.sh
-          uv tool install "openshell==${OPENSHELL_VERSION}" \
-            --require-hashes \
-            --hash "${OPENSHELL_WHEEL_SHA}"
-          openshell --version
+        run: .github/scripts/install-openshell.sh
 
       - name: Configure OpenShell gateway
         run: |
