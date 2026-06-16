@@ -263,10 +263,6 @@ runs:
         podman info
         systemctl --user start podman.socket
 
-    - name: Install OpenShell CLI
-      shell: bash
-      run: "$GITHUB_ACTION_PATH/.github/scripts/install-openshell.sh"
-
     - name: Configure OpenShell gateway
       shell: bash
       run: |
@@ -274,6 +270,10 @@ runs:
         cat > $HOME/.config/openshell/gateway.env << EOF
         OPENSHELL_BIND_ADDRESS=0.0.0.0
         EOF
+
+    - name: Install OpenShell CLI
+      shell: bash
+      run: "$GITHUB_ACTION_PATH/.github/scripts/install-openshell.sh"
 
     - name: Restore cached sandbox image
       id: sandbox-cache
