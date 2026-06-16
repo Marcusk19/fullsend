@@ -1,5 +1,5 @@
 # The agent should identify this as a duplicate of the seed issue (#1).
-state: open
+state: closed
 
 labels:
   required:
